@@ -13,7 +13,7 @@ import (
 type TokenResponse struct {
 	Token  string `json:"token"`
 	Client string `json:"client"`
-	Status string `json:"status"`
+	Stat   string `json:"stat"` // correct field name + json tag
 	Emsg   string `json:"emsg"`
 }
 
@@ -22,7 +22,6 @@ func GetSessionToken(apiKey, requestCode, apiSecret string) (string, error) {
 		return "", fmt.Errorf("request_code required - get fresh one from browser daily")
 	}
 
-	// IMPORTANT: hash = SHA256(api_key + request_code + api_secret)
 	input := apiKey + requestCode + apiSecret
 	hash := sha256.Sum256([]byte(input))
 	securityKey := hex.EncodeToString(hash[:])
@@ -52,9 +51,11 @@ func GetSessionToken(apiKey, requestCode, apiSecret string) (string, error) {
 		return "", fmt.Errorf("invalid JSON: %v - raw: %s", err, string(body))
 	}
 
-	if tr.Status == "Ok" {
+	//fmt.Printf("DEBUG - Parsed Stat: %s\n", tr.Stat)
+
+	if tr.Stat == "Ok" {
 		return tr.Token, nil
 	}
 
-	return "", fmt.Errorf("failed: status=%s emsg=%s raw=%s", tr.Status, tr.Emsg, string(body))
+	return "", fmt.Errorf("failed: stat=%s emsg=%s raw=%s", tr.Stat, tr.Emsg, string(body))
 }

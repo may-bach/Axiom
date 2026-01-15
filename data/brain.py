@@ -5,7 +5,8 @@ import time
 import pyotp
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from smartapi import SmartConnect
+from SmartApi import SmartConnect
+
 
 # ----------------------------------------------------------------------
 # Load env
@@ -36,8 +37,7 @@ try:
         STOCKS = json.load(f)["tickers"]
     print(f"Loaded {len(STOCKS)} stocks from stocks.json")
 except Exception as e:
-    print(f"stocks.json missing → using fallback: {e}")
-    STOCKS = ["RVNL", "IRFC", "SBIN", "TATASTEEL", "HCLTECH"]
+    print(f"-----")
 
 # ----------------------------------------------------------------------
 # Angel One login
@@ -84,11 +84,11 @@ def get_token(symbol):
         get_token.cache = {}
 
     # Search scrip
-    search = api.searchScrip(exchange="NSE", searchtext=symbol)
+    search = api.searchScrip(exchange="NSE", searchscrip=symbol)
     if search["status"]:
         for item in search["data"]:
             if item["tradingsymbol"] == f"{symbol}-EQ":
-                token = item["token"]
+                token = item["symboltoken"]
                 get_token.cache[symbol] = token
                 return token
     raise ValueError(f"Token not found for {symbol}")
@@ -123,7 +123,7 @@ def ema(prices, span=50):
 # ----------------------------------------------------------------------
 stock_configs = {}
 
-print("\nBrain analysis started...")
+print("\nBrain nalysis Initiated")
 for sym in STOCKS:
     try:
         hist = fetch_historic(sym)
@@ -165,7 +165,6 @@ for sym in STOCKS:
                 "sl": 0.010,
                 "leverage": 2.0
             })
-            print(f"SNIPER BUY {sym} | RSI {rsi_val:.0f} | +{day_chg:.2f}%")
 
         # ----- CLASS A (Bull momentum) -----
         elif mom_3d > 1.5 and rsi_val < 70 and day_chg > -0.5 and trend == "BULL":
@@ -175,7 +174,6 @@ for sym in STOCKS:
                 "target": 0.015,
                 "leverage": 2.0
             })
-            print(f"CLASS A Bull {sym} | 3D {mom_3d:+.1f}%")
 
         # ----- CLASS C (Bear / Rubber-Band) -----
         elif (mom_3d < -1.5 or day_chg < -1.5) and rsi_val > 30 and trend == "BEAR" and allow_short:
@@ -185,7 +183,6 @@ for sym in STOCKS:
                 "target": 0.015,
                 "leverage": 2.0
             })
-            print(f"CLASS C Bear {sym} | 3D {mom_3d:+.1f}%")
 
         elif rsi_val > 75 and allow_short:
             cfg.update({
@@ -194,10 +191,9 @@ for sym in STOCKS:
                 "target": 0.010,
                 "sl": 0.005
             })
-            print(f"RUBBER-BAND Short {sym} | RSI {rsi_val:.0f}")
 
         stock_configs[sym] = cfg
-        time.sleep(0.5)   # polite to Angel API
+        time.sleep(1)  
 
     except Exception as e:
         print(f"{sym} error: {e}")

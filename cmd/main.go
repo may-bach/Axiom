@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,45 +20,45 @@ import (
 var (
 	symbolToToken map[string]string
 	mu            sync.Mutex
-
-	// Day high/low tracking
-	highLow = make(map[string]struct{ High, Low float64 })
-
-	// Recent LTP history (for bounce/quick drop) - last few values
-	ltpHistory = make(map[string][]float64)
-
-	// Long positions
+	highLow       = make(map[string]struct{ High, Low float64 })
+	ltpHistory    = make(map[string][]float64)
 	longPositions = make(map[string]struct {
-		EntryPrice   float64
-		HighestPrice float64 // trailing SL
-		Qty          int
+		EntryPrice, HighestPrice float64
+		Qty                      int
 	})
-
-	// Short positions
 	shortPositions = make(map[string]struct {
-		EntryPrice  float64
-		LowestPrice float64 // trailing SL for shorts
-		Qty         int
+		EntryPrice, LowestPrice float64
+		Qty                     int
 	})
+	stockStrategies = make(map[string]StockStrategy)
 
-	// Configurable parameters
-	budgetPerTrade         = 100000.0 // ₹ per trade
-	maxConcurrentPositions = 8        // total long + short open at once
-	bufferPercent          = 0.002    // 0.2% buffer for breakouts
-	bounceReboundPercent   = 0.008    // 0.8% up move → bounce buy
-	quickDropPercent       = 0.012    // 1.2% drop in one poll → quick short
-	fixedSLPercent         = 1.0
-	targetPercent          = 2.0
-	trailingSLPercent      = 1.0
-	historyWindow          = 3 // how many recent LTPs to keep
+	defaultBudget          = 100000.0
+	defaultMaxPositions    = 8
+	defaultBuffer          = 0.002
+	defaultBounceRebound   = 0.008
+	defaultQuickDrop       = 0.012
+	defaultFixedSLPercent  = 1.0
+	defaultTargetPercent   = 2.0
+	defaultTrailingPercent = 1.0
+	defaultLeverage        = 1.0
+	historyWindow          = 3
 )
+
+type StockStrategy struct {
+	Class         string  `json:"class"`
+	AllowShort    bool    `json:"allow_short"`
+	BreakoutLong  float64 `json:"breakout_long"`
+	BreakoutShort float64 `json:"breakout_short"`
+	Target        float64 `json:"target"`
+	SL            float64 `json:"sl"`
+	Leverage      float64 `json:"leverage"`
+}
 
 func main() {
 	config.Load()
-	fmt.Println("Axiom Protocol Initializing...")
 
-	// Authenticate
-	token, err := auth.GetSessionToken(config.APIKey, config.RequestCode, config.SecretKey)
+	// Initialize session using config.C (struct field)
+	token, err := auth.GetSessionToken(config.C.APIKey, config.C.RequestCode, config.C.SecretKey)
 	if err != nil {
 		log.Fatalf("Auth failed: %v", err)
 	}
@@ -104,7 +106,7 @@ func main() {
 					fmt.Printf("No -EQ found for %s\n", sym)
 				}
 			} else {
-				fmt.Printf("Search failed for %s: %s\n", sym, sr.Emsg)
+				fmt.Printf("Search failed for %s: %s\n", sym)
 			}
 
 			time.Sleep(300 * time.Millisecond)
@@ -114,7 +116,14 @@ func main() {
 
 	fmt.Printf("Mapped %d/%d symbols successfully\n", len(symbolToToken), len(stocks.Tickers))
 
-	// Quick LTP test after auth
+	// Load brain.py config.json
+	if err := loadBrainConfig(); err != nil {
+		log.Printf("Warning: Could not load config.json - using defaults: %v", err)
+	} else {
+		fmt.Printf("Loaded %d stock-specific strategies from config.json\n", len(stockStrategies))
+	}
+
+	// Immediate LTP test
 	fmt.Println("Testing LTP immediately after auth...")
 	if len(symbolToToken) > 0 {
 		var firstSym, firstToken string
@@ -137,11 +146,21 @@ func main() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
+	lastBrainUpdate := time.Now()
+
 	for range ticker.C {
 		now := time.Now().In(time.FixedZone("IST", 5*60*60+30*60))
 		if now.Hour() >= 15 && now.Minute() >= 10 {
 			squareOffAllPositions(now)
 			break
+		}
+
+		// Reload config.json every 15 minutes
+		if time.Since(lastBrainUpdate) >= 15*time.Minute {
+			if err := loadBrainConfig(); err == nil {
+				fmt.Printf("Reloaded config.json - %d strategies\n", len(stockStrategies))
+			}
+			lastBrainUpdate = time.Now()
 		}
 
 		fmt.Printf("Polling LTP at %s\n", now.Format("15:04:05"))
@@ -178,13 +197,50 @@ func main() {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Core helper functions
-// ──────────────────────────────────────────────────────────────────────────────
+// Load config.json from brain.py
+func loadBrainConfig() error {
+	data, err := os.ReadFile("config.json")
+	if err != nil {
+		return err
+	}
 
+	var configs map[string]StockStrategy
+	if err := json.Unmarshal(data, &configs); err != nil {
+		return err
+	}
+
+	mu.Lock()
+	stockStrategies = configs
+	mu.Unlock()
+
+	return nil
+}
+
+// Get strategy with fallback
+func getStrategy(sym string) StockStrategy {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if strat, ok := stockStrategies[sym]; ok {
+		return strat
+	}
+
+	return StockStrategy{
+		Class:         "B",
+		AllowShort:    true,
+		BreakoutLong:  defaultBuffer,
+		BreakoutShort: defaultBuffer,
+		Target:        defaultTargetPercent / 100,
+		SL:            defaultFixedSLPercent / 100,
+		Leverage:      defaultLeverage,
+	}
+}
+
+// Update day high/low
 func updateHighLow(sym string, ltp float64) {
 	mu.Lock()
 	defer mu.Unlock()
+
 	hl := highLow[sym]
 	if hl.High == 0 || ltp > hl.High {
 		hl.High = ltp
@@ -195,9 +251,11 @@ func updateHighLow(sym string, ltp float64) {
 	highLow[sym] = hl
 }
 
+// Update LTP history for bounce/quick drop
 func updateLTPHistory(sym string, ltp float64) {
 	mu.Lock()
 	defer mu.Unlock()
+
 	hist := ltpHistory[sym]
 	hist = append(hist, ltp)
 	if len(hist) > historyWindow {
@@ -206,31 +264,31 @@ func updateLTPHistory(sym string, ltp float64) {
 	ltpHistory[sym] = hist
 }
 
-func getTotalOpenPositions() int {
-	return len(longPositions) + len(shortPositions)
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
-// Entry logic (all four signals)
+// Entry logic using per-stock thresholds from config
 // ──────────────────────────────────────────────────────────────────────────────
 
 func checkAllEntries(sym string, ltp float64) {
 	mu.Lock()
-	totalOpen := getTotalOpenPositions()
+	totalOpen := len(longPositions) + len(shortPositions)
 	mu.Unlock()
 
-	if totalOpen >= maxConcurrentPositions {
-		fmt.Printf("Max positions (%d/%d) reached - skipping %s\n", totalOpen, maxConcurrentPositions, sym)
+	if totalOpen >= defaultMaxPositions {
+		fmt.Printf("Max positions (%d/%d) reached - skipping %s\n", totalOpen, defaultMaxPositions, sym)
 		return
 	}
 
-	checkBreakoutLong(sym, ltp)
+	strat := getStrategy(sym)
+
+	checkBreakoutLong(sym, ltp, strat.BreakoutLong)
 	checkBounceBackBuy(sym, ltp)
-	checkBreakdownShort(sym, ltp)
-	checkQuickDropShort(sym, ltp)
+	if strat.AllowShort {
+		checkBreakdownShort(sym, ltp, strat.BreakoutShort)
+		checkQuickDropShort(sym, ltp)
+	}
 }
 
-func checkBreakoutLong(sym string, ltp float64) {
+func checkBreakoutLong(sym string, ltp, threshold float64) {
 	mu.Lock()
 	hl := highLow[sym]
 	pos := longPositions[sym]
@@ -240,9 +298,9 @@ func checkBreakoutLong(sym string, ltp float64) {
 		return
 	}
 
-	if hl.High > 0 && ltp > hl.High*(1+bufferPercent) {
-		fmt.Printf("[LONG] Breakout BUY %s @ %.2f (high: %.2f)\n", sym, ltp, hl.High)
-		enterLong(sym, ltp)
+	if hl.High > 0 && ltp > hl.High*(1+threshold) {
+		fmt.Printf("BREAKOUT LONG BUY %s @ %.2f (threshold %.3f)\n", sym, ltp, threshold)
+		enterLong(sym, ltp, getStrategy(sym).Leverage)
 	}
 }
 
@@ -258,14 +316,13 @@ func checkBounceBackBuy(sym string, ltp float64) {
 	}
 
 	prev := hist[len(hist)-2]
-	if prev <= hl.Low*1.005 && // near low
-		ltp >= prev*(1+bounceReboundPercent) { // strong bounce
-		fmt.Printf("[LONG] Bounce BUY %s @ %.2f (prev: %.2f, low: %.2f)\n", sym, ltp, prev, hl.Low)
-		enterLong(sym, ltp)
+	if prev <= hl.Low*1.005 && ltp >= prev*(1+defaultBounceRebound) {
+		fmt.Printf("BOUNCE BACK BUY %s @ %.2f (prev %.2f, low %.2f)\n", sym, ltp, prev, hl.Low)
+		enterLong(sym, ltp, getStrategy(sym).Leverage)
 	}
 }
 
-func checkBreakdownShort(sym string, ltp float64) {
+func checkBreakdownShort(sym string, ltp, threshold float64) {
 	mu.Lock()
 	hl := highLow[sym]
 	pos := shortPositions[sym]
@@ -275,9 +332,9 @@ func checkBreakdownShort(sym string, ltp float64) {
 		return
 	}
 
-	if hl.Low > 0 && ltp < hl.Low*(1-bufferPercent) {
-		fmt.Printf("[SHORT] Breakdown SELL %s @ %.2f (low: %.2f)\n", sym, ltp, hl.Low)
-		enterShort(sym, ltp)
+	if hl.Low > 0 && ltp < hl.Low*(1-threshold) {
+		fmt.Printf("BREAKDOWN SHORT SELL %s @ %.2f (threshold %.3f)\n", sym, ltp, threshold)
+		enterShort(sym, ltp, getStrategy(sym).Leverage)
 	}
 }
 
@@ -293,19 +350,21 @@ func checkQuickDropShort(sym string, ltp float64) {
 
 	prev := hist[len(hist)-2]
 	drop := (prev - ltp) / prev
-	if drop >= quickDropPercent {
-		fmt.Printf("[SHORT] Quick Drop SELL %s @ %.2f (drop: %.2f%% from %.2f)\n", sym, ltp, drop*100, prev)
-		enterShort(sym, ltp)
+	if drop >= defaultQuickDrop {
+		fmt.Printf("QUICK DROP SHORT SELL %s @ %.2f (drop %.2f%%)\n", sym, ltp, drop*100)
+		enterShort(sym, ltp, getStrategy(sym).Leverage)
 	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Entry & Exit helpers (unchanged)
+// Entry / Exit helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-func enterLong(sym string, ltp float64) {
-	qty := int(budgetPerTrade / ltp)
+func enterLong(sym string, ltp float64, leverage float64) {
+	effectiveBudget := defaultBudget * leverage
+	qty := int(effectiveBudget / ltp)
 	if qty < 1 {
+		fmt.Printf("Budget too low for long %s (leverage %.1f)\n", sym, leverage)
 		return
 	}
 
@@ -323,12 +382,14 @@ func enterLong(sym string, ltp float64) {
 	}{ltp, ltp, qty}
 	mu.Unlock()
 
-	fmt.Printf("Entered LONG %s: Qty %d @ %.2f\n", sym, qty, ltp)
+	fmt.Printf("Entered LONG %s: Qty %d @ %.2f (leverage %.1f)\n", sym, qty, ltp, leverage)
 }
 
-func enterShort(sym string, ltp float64) {
-	qty := int(budgetPerTrade / ltp)
+func enterShort(sym string, ltp float64, leverage float64) {
+	effectiveBudget := defaultBudget * leverage
+	qty := int(effectiveBudget / ltp)
 	if qty < 1 {
+		fmt.Printf("Budget too low for short %s (leverage %.1f)\n", sym, leverage)
 		return
 	}
 
@@ -346,10 +407,160 @@ func enterShort(sym string, ltp float64) {
 	}{ltp, ltp, qty}
 	mu.Unlock()
 
-	fmt.Printf("Entered SHORT %s: Qty %d @ %.2f\n", sym, qty, ltp)
+	fmt.Printf("Entered SHORT %s: Qty %d @ %.2f (leverage %.1f)\n", sym, qty, ltp, leverage)
 }
 
-// (The rest of the code — checkLongExit, checkShortExit, exitLong, exitShort, squareOffAllPositions, loadSavedTokenMap, saveTokenMap, max/min helpers — remains exactly the same as in the previous full version)
+func checkLongExit(sym string, ltp float64) {
+	mu.Lock()
+	pos, exists := longPositions[sym]
+	mu.Unlock()
+
+	if !exists {
+		return
+	}
+
+	strat := getStrategy(sym)
+
+	mu.Lock()
+	pos.HighestPrice = max(pos.HighestPrice, ltp)
+	longPositions[sym] = pos
+	mu.Unlock()
+
+	fixedSL := pos.EntryPrice * (1 - strat.SL)
+	if ltp <= fixedSL {
+		fmt.Printf("LONG FIXED SL hit %s @ %.2f (SL %.3f)\n", sym, ltp, strat.SL)
+		exitLong(sym, ltp, pos.Qty)
+		return
+	}
+
+	target := pos.EntryPrice * (1 + strat.Target)
+	if ltp >= target {
+		fmt.Printf("LONG TARGET hit %s @ %.2f (target %.3f)\n", sym, ltp, strat.Target)
+		exitLong(sym, ltp, pos.Qty)
+		return
+	}
+
+	trailingSL := pos.HighestPrice * (1 - defaultTrailingPercent/100)
+	if ltp <= trailingSL {
+		fmt.Printf("LONG TRAILING SL %s @ %.2f\n", sym, ltp)
+		exitLong(sym, ltp, pos.Qty)
+	}
+}
+
+func checkShortExit(sym string, ltp float64) {
+	mu.Lock()
+	pos, exists := shortPositions[sym]
+	mu.Unlock()
+
+	if !exists {
+		return
+	}
+
+	strat := getStrategy(sym)
+
+	mu.Lock()
+	pos.LowestPrice = min(pos.LowestPrice, ltp)
+	shortPositions[sym] = pos
+	mu.Unlock()
+
+	fixedSL := pos.EntryPrice * (1 + strat.SL)
+	if ltp >= fixedSL {
+		fmt.Printf("SHORT FIXED SL hit %s @ %.2f (SL %.3f)\n", sym, ltp, strat.SL)
+		exitShort(sym, ltp, pos.Qty)
+		return
+	}
+
+	target := pos.EntryPrice * (1 - strat.Target)
+	if ltp <= target {
+		fmt.Printf("SHORT TARGET hit %s @ %.2f (target %.3f)\n", sym, ltp, strat.Target)
+		exitShort(sym, ltp, pos.Qty)
+		return
+	}
+
+	trailingSL := pos.LowestPrice * (1 + defaultTrailingPercent/100)
+	if ltp >= trailingSL {
+		fmt.Printf("SHORT TRAILING SL %s @ %.2f\n", sym, ltp)
+		exitShort(sym, ltp, pos.Qty)
+	}
+}
+
+func exitLong(sym string, ltp float64, qty int) {
+	err := client.PlaceOrder(sym, symbolToToken[sym], "SELL", "MKT", qty)
+	if err != nil {
+		log.Printf("Long exit failed %s: %v", sym, err)
+		return
+	}
+	fmt.Printf("Exited LONG %s: Qty %d @ %.2f\n", sym, qty, ltp)
+
+	mu.Lock()
+	delete(longPositions, sym)
+	mu.Unlock()
+}
+
+func exitShort(sym string, ltp float64, qty int) {
+	err := client.PlaceOrder(sym, symbolToToken[sym], "BUY", "MKT", qty)
+	if err != nil {
+		log.Printf("Short exit failed %s: %v", sym, err)
+		return
+	}
+	fmt.Printf("Exited SHORT %s: Qty %d @ %.2f\n", sym, qty, ltp)
+
+	mu.Lock()
+	delete(shortPositions, sym)
+	mu.Unlock()
+}
+
+func squareOffAllPositions(now time.Time) {
+	fmt.Printf("Square-off time (%s) - exiting all\n", now.Format("15:04"))
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for sym, pos := range longPositions {
+		ltp, _ := client.GetLTP("NSE", symbolToToken[sym])
+		exitLong(sym, ltp, pos.Qty)
+	}
+
+	for sym, pos := range shortPositions {
+		ltp, _ := client.GetLTP("NSE", symbolToToken[sym])
+		exitShort(sym, ltp, pos.Qty)
+	}
+
+	fmt.Println("All positions squared off. Bot stopping.")
+}
+
+func loadSavedTokenMap() bool {
+	path := filepath.Join("data", "token_map.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+
+	var saved struct {
+		Map map[string]string `json:"map"`
+	}
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return false
+	}
+
+	if len(saved.Map) != len(stocks.Tickers) {
+		return false
+	}
+
+	symbolToToken = saved.Map
+	return true
+}
+
+func saveTokenMap() {
+	data, _ := json.MarshalIndent(struct {
+		Map map[string]string `json:"map"`
+	}{Map: symbolToToken}, "", "  ")
+
+	path := filepath.Join("data", "token_map.json")
+	os.MkdirAll(filepath.Dir(path), 0755)
+	os.WriteFile(path, data, 0644)
+	fmt.Println("Token map saved to data/token_map.json")
+}
 
 func max(a, b float64) float64 {
 	if a > b {
@@ -364,5 +575,3 @@ func min(a, b float64) float64 {
 	}
 	return b
 }
-
-// ... (add loadSavedTokenMap and saveTokenMap functions here as before)

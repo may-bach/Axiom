@@ -1,0 +1,344 @@
+{
+    "HDFCBANK": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "ICICIBANK": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "AXISBANK": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "KOTAKBANK": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "SBIN": {
+        "class": "C",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.001,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "INDUSINDBK": {
+        "class": "C",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.001,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "BANDHANBNK": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "BAJFINANCE": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "TECHM": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "BAJAJFINSV": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "INFY": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "WIPRO": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "HCLTECH": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "MARUTI": {
+        "class": "C",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.002,
+        "target": 0.015,
+        "sl": 0.005,
+        "leverage": 2.0
+    },
+    "TCS": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "TATAPOWER": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "TATACONSUM": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "TITAN": {
+        "class": "C",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.001,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "LT": {
+        "class": "C",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.002,
+        "target": 0.015,
+        "sl": 0.005,
+        "leverage": 2.0
+    },
+    "RELIANCE": {
+        "class": "A",
+        "allow_short": true,
+        "breakout_long": 0.001,
+        "breakout_short": 0.005,
+        "target": 0.02,
+        "sl": 0.01,
+        "leverage": 2.0
+    },
+    "JINDALSTEL": {
+        "class": "A",
+        "allow_short": true,
+        "breakout_long": 0.002,
+        "breakout_short": 0.005,
+        "target": 0.015,
+        "sl": 0.005,
+        "leverage": 2.0
+    },
+    "HINDALCO": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "ADANIENT": {
+        "class": "B",
+        "allow_short": false,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "DLF": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "SRF": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "APOLLOHOSP": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "JUBLFOOD": {
+        "class": "A",
+        "allow_short": true,
+        "breakout_long": 0.001,
+        "breakout_short": 0.005,
+        "target": 0.02,
+        "sl": 0.01,
+        "leverage": 2.0
+    },
+    "SUZLON": {
+        "class": "A",
+        "allow_short": true,
+        "breakout_long": 0.001,
+        "breakout_short": 0.005,
+        "target": 0.02,
+        "sl": 0.01,
+        "leverage": 2.0
+    },
+    "IRFC": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "RVNL": {
+        "class": "A",
+        "allow_short": true,
+        "breakout_long": 0.002,
+        "breakout_short": 0.005,
+        "target": 0.015,
+        "sl": 0.005,
+        "leverage": 2.0
+    },
+    "TITAGARH": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "BEL": {
+        "class": "B",
+        "allow_short": true,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "RAILTEL": {
+        "class": "B",
+        "allow_short": false,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "HAL": {
+        "class": "B",
+        "allow_short": false,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "MAZDOCK": {
+        "class": "B",
+        "allow_short": false,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "PARAS": {
+        "class": "B",
+        "allow_short": false,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "BEML": {
+        "class": "B",
+        "allow_short": false,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    },
+    "BDL": {
+        "class": "B",
+        "allow_short": false,
+        "breakout_long": 0.005,
+        "breakout_short": 0.005,
+        "target": 0.01,
+        "sl": 0.005,
+        "leverage": 1.0
+    }
+}

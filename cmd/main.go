@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -56,8 +57,9 @@ type StockStrategy struct {
 
 func main() {
 	config.Load()
+	fmt.Println("Axiom Protocol Initializing...")
 
-	// Initialize session using config.C (struct field)
+	// Authenticate
 	token, err := auth.GetSessionToken(config.C.APIKey, config.C.RequestCode, config.C.SecretKey)
 	if err != nil {
 		log.Fatalf("Auth failed: %v", err)
@@ -66,7 +68,7 @@ func main() {
 	fmt.Println("Session token set globally")
 
 	// Load watchlist
-	if err := stocks.Load(""); err != nil {
+	if err := stocks.Load("data/stocks.json"); err != nil {
 		log.Printf("Warning: Could not load stocks.json - %v", err)
 	} else {
 		fmt.Printf("Loaded %d stocks to monitor\n", len(stocks.Tickers))
@@ -80,7 +82,7 @@ func main() {
 		fmt.Println("Loaded existing token map from file")
 	} else {
 		for _, sym := range stocks.Tickers {
-			respBytes, err := client.SearchScrip("NSE", sym)
+			respBytes, err := client.SearchScrip("NSE", sym+"-EQ")
 			if err != nil {
 				log.Printf("Search failed for %s: %v", sym, err)
 				continue
@@ -116,7 +118,7 @@ func main() {
 
 	fmt.Printf("Mapped %d/%d symbols successfully\n", len(symbolToToken), len(stocks.Tickers))
 
-	// Load brain.py config.json
+	// Initial load of brain config
 	if err := loadBrainConfig(); err != nil {
 		log.Printf("Warning: Could not load config.json - using defaults: %v", err)
 	} else {
@@ -140,9 +142,8 @@ func main() {
 		}
 	}
 
-	fmt.Println("Bot running. Press Ctrl+C to exit.")
+	fmt.Println("Bot running 24/7. Press Ctrl+C to exit.")
 
-	// Main polling loop
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -150,16 +151,15 @@ func main() {
 
 	for range ticker.C {
 		now := time.Now().In(time.FixedZone("IST", 5*60*60+30*60))
-		if now.Hour() >= 15 && now.Minute() >= 10 {
+
+		// Auto square-off at 15:10 IST (but continue running)
+		if now.Hour() == 15 && now.Minute() >= 10 {
 			squareOffAllPositions(now)
-			break
 		}
 
-		// Reload config.json every 15 minutes
+		// Run brain.py and reload config every 15 minutes
 		if time.Since(lastBrainUpdate) >= 15*time.Minute {
-			if err := loadBrainConfig(); err == nil {
-				fmt.Printf("Reloaded config.json - %d strategies\n", len(stockStrategies))
-			}
+			runBrainAndReload()
 			lastBrainUpdate = time.Now()
 		}
 
@@ -197,9 +197,30 @@ func main() {
 	}
 }
 
-// Load config.json from brain.py
+func runBrainAndReload() {
+	// Adjust path to brain.py if needed (assumes it's in data/ folder)
+	brainPath := filepath.Join("..", "data", "brain.py")
+
+	cmd := exec.Command("python", brainPath)
+	cmd.Dir = filepath.Dir(brainPath) // run from data/ folder
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Failed to run brain.py: %v\nOutput: %s", err, string(output))
+		return
+	}
+
+	fmt.Println("brain.py executed successfully - refreshing config...")
+	if err := loadBrainConfig(); err == nil {
+		fmt.Printf("Reloaded config.json - %d strategies\n", len(stockStrategies))
+	} else {
+		log.Printf("Reload failed: %v", err)
+	}
+}
+
 func loadBrainConfig() error {
-	data, err := os.ReadFile("config.json")
+	dataPath := filepath.Join("data", "config.json")
+	data, err := os.ReadFile(dataPath)
 	if err != nil {
 		return err
 	}
@@ -216,7 +237,6 @@ func loadBrainConfig() error {
 	return nil
 }
 
-// Get strategy with fallback
 func getStrategy(sym string) StockStrategy {
 	mu.Lock()
 	defer mu.Unlock()

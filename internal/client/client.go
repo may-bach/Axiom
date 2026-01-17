@@ -82,7 +82,13 @@ func SearchScrip(exch, searchText string) ([]byte, error) {
 		"exch":  exch,
 		"stext": searchText,
 	}
-	return MakeRequest("/SearchScrip", payload)
+	respBytes, err := MakeRequest("/SearchScrip", payload)
+	if err != nil {
+		return nil, err
+	}
+	raw := string(respBytes)
+	fmt.Printf("DEBUG SearchScrip raw for %s: %s\n", searchText, raw)
+	return respBytes, nil
 }
 
 type TouchlineResponse struct {

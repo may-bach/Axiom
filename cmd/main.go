@@ -56,8 +56,9 @@ type StockStrategy struct {
 }
 
 func main() {
+
+	fmt.Println("Axiom Protocol Initializing")
 	config.Load()
-	fmt.Println("Axiom Protocol Initializing...")
 
 	// Authenticate
 	token, err := auth.GetSessionToken(config.C.APIKey, config.C.RequestCode, config.C.SecretKey)
@@ -70,17 +71,24 @@ func main() {
 	// Load watchlist
 	if err := stocks.Load("data/stocks.json"); err != nil {
 		log.Printf("Warning: Could not load stocks.json - %v", err)
-	} else {
-		fmt.Printf("Loaded %d stocks to monitor\n", len(stocks.Tickers))
 	}
 
 	// Symbol → Token mapping
 	symbolToToken = make(map[string]string)
-	fmt.Println("Mapping symbols to tokens...")
+	fmt.Println("Mapping symbols to tokens")
 
 	if loadSavedTokenMap() {
 		fmt.Println("Loaded existing token map from file")
 	} else {
+		// CRITICAL FIX: Re-authenticate just before mapping (token might have expired)
+		fmt.Println("Token map not found or expired — re-authenticating...")
+		newToken, err := auth.GetSessionToken(config.C.APIKey, config.C.RequestCode, config.C.SecretKey)
+		if err != nil {
+			log.Fatalf("Re-auth failed during mapping: %v", err)
+		}
+		session.Set(newToken)
+		fmt.Println("Re-authenticated — fresh session token set")
+
 		for _, sym := range stocks.Tickers {
 			respBytes, err := client.SearchScrip("NSE", sym+"-EQ")
 			if err != nil {
@@ -97,7 +105,7 @@ func main() {
 			if sr.Stat == "Ok" {
 				found := false
 				for _, v := range sr.Values {
-					if v.Tsym == sym+"-EQ" {
+					if strings.Contains(v.Tsym, "-EQ") {
 						symbolToToken[sym] = v.Token
 						fmt.Printf("Mapped %s → %s\n", sym, v.Token)
 						found = true
@@ -105,7 +113,7 @@ func main() {
 					}
 				}
 				if !found {
-					fmt.Printf("No -EQ found for %s\n", sym)
+					fmt.Printf("No -EQ token found for %s\n", sym)
 				}
 			} else {
 				fmt.Printf("Search failed for %s: %s\n", sym)
@@ -116,17 +124,13 @@ func main() {
 		saveTokenMap()
 	}
 
-	fmt.Printf("Mapped %d/%d symbols successfully\n", len(symbolToToken), len(stocks.Tickers))
-
 	// Initial load of brain config
 	if err := loadBrainConfig(); err != nil {
 		log.Printf("Warning: Could not load config.json - using defaults: %v", err)
 	} else {
-		fmt.Printf("Loaded %d stock-specific strategies from config.json\n", len(stockStrategies))
+		fmt.Printf("Loaded Trading Strategies\n", len(stockStrategies))
 	}
 
-	// Immediate LTP test
-	fmt.Println("Testing LTP immediately after auth...")
 	if len(symbolToToken) > 0 {
 		var firstSym, firstToken string
 		for s, t := range symbolToToken {
@@ -134,16 +138,15 @@ func main() {
 			firstToken = t
 			break
 		}
-		ltp, err := client.GetLTP("NSE", firstToken)
+		_, err := client.GetLTP("NSE", firstToken)
 		if err != nil {
 			log.Printf("Immediate LTP test for %s failed: %v", firstSym, err)
-		} else {
-			fmt.Printf("Immediate LTP test for %s OK: %.2f\n", firstSym, ltp)
 		}
 	}
 
-	fmt.Println("Bot running 24/7. Press Ctrl+C to exit.")
+	fmt.Println("Axiom Protocol Online")
 
+	// Main polling loop
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -163,7 +166,7 @@ func main() {
 			lastBrainUpdate = time.Now()
 		}
 
-		fmt.Printf("Polling LTP at %s\n", now.Format("15:04:05"))
+		fmt.Printf("\nPolling LTP at %s\n", now.Format("15:04:05"))
 
 		successCount := 0
 		for sym, token := range symbolToToken {
@@ -179,8 +182,6 @@ func main() {
 				}
 				continue
 			}
-
-			fmt.Printf("%s LTP: %.2f\n", sym, ltp)
 			successCount++
 
 			updateHighLow(sym, ltp)
@@ -192,17 +193,16 @@ func main() {
 			time.Sleep(200 * time.Millisecond)
 		}
 
-		fmt.Printf("Successfully fetched LTP for %d/%d stocks\n", successCount, len(symbolToToken))
+		fmt.Printf("Successfully fetched LTP\n", successCount, len(symbolToToken))
 		fmt.Println("---")
 	}
 }
 
 func runBrainAndReload() {
-	// Adjust path to brain.py if needed (assumes it's in data/ folder)
-	brainPath := filepath.Join("..", "data", "brain.py")
+	brainPath := filepath.Join("data", "brain.py")
 
 	cmd := exec.Command("python", brainPath)
-	cmd.Dir = filepath.Dir(brainPath) // run from data/ folder
+	cmd.Dir = filepath.Dir(brainPath)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -218,6 +218,7 @@ func runBrainAndReload() {
 	}
 }
 
+// Load config.json from data/config.json
 func loadBrainConfig() error {
 	dataPath := filepath.Join("data", "config.json")
 	data, err := os.ReadFile(dataPath)
@@ -237,6 +238,7 @@ func loadBrainConfig() error {
 	return nil
 }
 
+// Get strategy with fallback
 func getStrategy(sym string) StockStrategy {
 	mu.Lock()
 	defer mu.Unlock()
@@ -261,7 +263,10 @@ func updateHighLow(sym string, ltp float64) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	hl := highLow[sym]
+	hl, exists := highLow[sym]
+	if !exists {
+		hl = struct{ High, Low float64 }{0, 0}
+	}
 	if hl.High == 0 || ltp > hl.High {
 		hl.High = ltp
 	}
@@ -276,7 +281,10 @@ func updateLTPHistory(sym string, ltp float64) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	hist := ltpHistory[sym]
+	hist, exists := ltpHistory[sym]
+	if !exists {
+		hist = []float64{}
+	}
 	hist = append(hist, ltp)
 	if len(hist) > historyWindow {
 		hist = hist[1:]
@@ -546,7 +554,7 @@ func squareOffAllPositions(now time.Time) {
 		exitShort(sym, ltp, pos.Qty)
 	}
 
-	fmt.Println("All positions squared off. Bot stopping.")
+	fmt.Println("All positions squared off.")
 }
 
 func loadSavedTokenMap() bool {

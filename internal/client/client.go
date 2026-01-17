@@ -7,9 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/may-bach/Axiom/internal/auth"
+	"github.com/may-bach/Axiom/internal/config"
 	"github.com/may-bach/Axiom/internal/session"
 )
 
@@ -22,15 +26,29 @@ type APIResponse struct {
 	Emsg string `json:"emsg"`
 }
 
+type SearchResult struct {
+	Stat   string `json:"stat"`
+	Values []struct {
+		Tsym  string `json:"tsym"`
+		Token string `json:"token"`
+	} `json:"values"`
+}
+
 func MakeRequest(endpoint string, payload map[string]string) ([]byte, error) {
 	token := session.Get()
 	if token == "" {
 		return nil, fmt.Errorf("no session token - authenticate first")
 	}
 
+	// Load UID from .env (required!)
+	uid := os.Getenv("FLAT_USER_ID")
+	if uid == "" {
+		return nil, fmt.Errorf("FLAT_USER_ID missing in .env")
+	}
+
 	// Inject common fields
-	payload["uid"] = "your_user_id_here" // ← replace with actual UID if needed, or get from env/session
-	payload["actid"] = payload["uid"]
+	payload["uid"] = uid
+	payload["actid"] = uid
 	payload["source"] = "API"
 
 	jsonBody, err := json.Marshal(payload)
@@ -42,6 +60,8 @@ func MakeRequest(endpoint string, payload map[string]string) ([]byte, error) {
 
 	url := BaseURL + endpoint
 
+	// Create request with timeout
+	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(finalBody)))
 	if err != nil {
 		return nil, err
@@ -49,9 +69,9 @@ func MakeRequest(endpoint string, payload map[string]string) ([]byte, error) {
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -61,20 +81,43 @@ func MakeRequest(endpoint string, payload map[string]string) ([]byte, error) {
 	}
 
 	raw := string(body)
-	if strings.Contains(raw, "Invalid Session Key") || strings.Contains(raw, "Connection failed") {
-		// Optional: log session invalid - re-auth will be handled in main.go
-		fmt.Println("DEBUG: Invalid session detected - re-auth required")
+
+	if strings.Contains(raw, "Session Expired") ||
+		strings.Contains(raw, "Invalid Session") ||
+		strings.Contains(raw, "Invalid User Id") ||
+		strings.Contains(raw, "Not_Ok") {
+
+		// Re-authenticate
+		newToken, authErr := auth.GetSessionToken(config.C.APIKey, config.C.RequestCode, config.C.SecretKey)
+		if authErr != nil {
+			return nil, fmt.Errorf("re-auth failed: %v", authErr)
+		}
+
+		session.Set(newToken)
+
+		// Retry with new token
+		payload["jKey"] = newToken // update payload (though not strictly needed)
+		jsonBody, _ = json.Marshal(payload)
+		finalBody = "jData=" + string(jsonBody) + "&jKey=" + newToken
+
+		req, _ = http.NewRequest("POST", url, bytes.NewBuffer([]byte(finalBody)))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		resp, err = client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("retry request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		raw = string(body)
 	}
 
 	return body, nil
-}
-
-type SearchResult struct {
-	Stat   string `json:"stat"`
-	Values []struct {
-		Tsym  string `json:"tsym"`
-		Token string `json:"token"`
-	} `json:"values"`
 }
 
 func SearchScrip(exch, searchText string) ([]byte, error) {
@@ -86,8 +129,6 @@ func SearchScrip(exch, searchText string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw := string(respBytes)
-	fmt.Printf("DEBUG SearchScrip raw for %s: %s\n", searchText, raw)
 	return respBytes, nil
 }
 
@@ -110,7 +151,6 @@ func GetLTP(exch, token string) (float64, error) {
 	}
 
 	raw := string(respBytes)
-	fmt.Printf("DEBUG GetQuotes raw for token %s: %s\n", token, raw)
 
 	var qr TouchlineResponse
 	if err := json.Unmarshal(respBytes, &qr); err != nil {
@@ -162,7 +202,6 @@ func PlaceOrder(sym, token, buySell, orderType string, qty int) error {
 	}
 
 	raw := string(respBytes)
-	fmt.Printf("DEBUG PlaceOrder raw for %s: %s\n", sym, raw)
 
 	var or OrderResponse
 	if err := json.Unmarshal(respBytes, &or); err != nil {

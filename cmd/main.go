@@ -126,8 +126,6 @@ func main() {
 	// Load watchlist
 	if err := stocks.Load("data/stocks.json"); err != nil {
 		log.Printf("Warning: Could not load stocks.json - %v", err)
-	} else {
-		fmt.Printf("Loaded %d stocks to monitor\n", len(stocks.Tickers))
 	}
 
 	// Symbol → Token mapping
@@ -180,17 +178,15 @@ func main() {
 		saveTokenMap()
 	}
 
-	fmt.Printf("Mapped %d/%d symbols successfully\n", len(symbolToToken), len(stocks.Tickers))
+	fmt.Printf("Mapped symbols successfully\n", len(symbolToToken), len(stocks.Tickers))
 
 	// Load brain config
 	if err := loadBrainConfig(); err != nil {
 		log.Printf("Warning: Could not load config.json - using defaults: %v", err)
 	} else {
-		fmt.Printf("Loaded %d stock-specific strategies from config.json\n", len(stockStrategies))
+		fmt.Printf("Loaded strategies from config\n", len(stockStrategies))
 	}
 
-	// Immediate LTP test
-	fmt.Println("Testing LTP immediately after auth...")
 	if len(symbolToToken) > 0 {
 		var firstSym, firstToken string
 		for s, t := range symbolToToken {
@@ -208,7 +204,7 @@ func main() {
 
 	fmt.Println("Axiom Protocol Online")
 	if paperTrading {
-		fmt.Println("PAPER TRADING MODE ACTIVE — No real orders will be placed")
+		fmt.Println("Mode selected - Paper Trading")
 	}
 
 	// Main polling loop
@@ -253,7 +249,6 @@ func main() {
 				continue
 			}
 
-			fmt.Printf("%s LTP: %.2f\n", sym, ltp)
 			successCount++
 
 			updateHighLow(sym, ltp)
@@ -265,7 +260,7 @@ func main() {
 			time.Sleep(200 * time.Millisecond)
 		}
 
-		fmt.Printf("Successfully fetched LTP for %d/%d stocks\n", successCount, len(symbolToToken))
+		fmt.Printf("Successfully fetched LTP")
 		fmt.Println("---")
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -35,8 +34,8 @@ var (
 	})
 	stockStrategies = make(map[string]StockStrategy)
 
-	defaultBudget          = 100000.0
-	defaultMaxPositions    = 8
+	defaultBudget          = 15000.0 // Scaled for ₹10k capital + 5x margin
+	defaultMaxPositions    = 3       // Max 2-3 positions concurrently
 	defaultBuffer          = 0.002
 	defaultBounceRebound   = 0.008
 	defaultQuickDrop       = 0.012
@@ -54,7 +53,29 @@ var (
 	dailyPnL       float64
 	lastDailyReset time.Time
 	tradeHistory   []TradeRecord
+
+	currentRegime = MarketRegime{
+		Status:         "NORMAL",
+		Color:          "GREEN",
+		MaxPositions:   3,
+		PositionBudget: 15000.0,
+		DailyLossLimit: -750.0,
+	}
 )
+
+type MarketRegime struct {
+	Date              string   `json:"date"`
+	Timestamp         string   `json:"timestamp"`
+	RiskScore         int      `json:"risk_score"`
+	Status            string   `json:"status"`
+	Color             string   `json:"color"`
+	MaxPositions      int      `json:"max_positions"`
+	PositionBudget    float64  `json:"position_budget"`
+	StagnationMinutes int      `json:"stagnation_minutes"`
+	DailyLossLimit    float64  `json:"daily_loss_limit"`
+	Reason            string   `json:"reason"`
+	FlaggedHeadlines  []string `json:"flagged_headlines"`
+}
 
 type StockStrategy struct {
 	Class         string  `json:"class"`
@@ -98,12 +119,7 @@ func logTrade(msg string) {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	line := fmt.Sprintf("[%s] %s\n", timestamp, msg)
 
-	fmt.Print(line) // console
-
-	if tradeLogFile != nil {
-		tradeLogFile.WriteString(line)
-		tradeLogFile.Sync()
-	}
+	fmt.Print(line) // Console and stdout redirected to trades.log
 }
 
 func logTradeRecord(trade TradeRecord) {
@@ -135,13 +151,7 @@ func main() {
 	if loadSavedTokenMap() {
 		fmt.Println("Loaded existing token map from file")
 	} else {
-		fmt.Println("Token map not found or expired — re-authenticating...")
-		newToken, err := auth.GetSessionToken(config.C.APIKey, config.C.RequestCode, config.C.SecretKey)
-		if err != nil {
-			log.Fatalf("Re-auth failed during mapping: %v", err)
-		}
-		session.Set(newToken)
-		fmt.Println("Re-authenticated — fresh session token set")
+		fmt.Println("Token map incomplete or missing — resolving symbols via Flattrade API...")
 
 		for _, sym := range stocks.Tickers {
 			respBytes, err := client.SearchScrip("NSE", sym+"-EQ")
@@ -170,7 +180,7 @@ func main() {
 					fmt.Printf("No -EQ token found for %s\n", sym)
 				}
 			} else {
-				fmt.Printf("Search failed for %s: %s\n", sym)
+				fmt.Printf("Search failed for %s: %s\n", sym, sr.Stat)
 			}
 
 			time.Sleep(300 * time.Millisecond)
@@ -178,14 +188,17 @@ func main() {
 		saveTokenMap()
 	}
 
-	fmt.Printf("Mapped symbols successfully\n", len(symbolToToken), len(stocks.Tickers))
+	fmt.Printf("Mapped %d/%d symbols successfully\n", len(symbolToToken), len(stocks.Tickers))
 
-	// Load brain config
-	if err := loadBrainConfig(); err != nil {
+	// Load strategy config
+	if err := loadStrategyConfig(); err != nil {
 		log.Printf("Warning: Could not load config.json - using defaults: %v", err)
 	} else {
-		fmt.Printf("Loaded strategies from config\n", len(stockStrategies))
+		fmt.Printf("Loaded %d strategies from config\n", len(stockStrategies))
 	}
+
+	// Load Market Sentinel regime (Macro & Chop Detector)
+	loadMarketRegime()
 
 	if len(symbolToToken) > 0 {
 		var firstSym, firstToken string
@@ -207,17 +220,20 @@ func main() {
 		fmt.Println("Mode selected - Paper Trading")
 	}
 
-	// Main polling loop
-	ticker := time.NewTicker(10 * time.Second)
+	// Main polling loop (20s interval to stay safely under Flattrade 120 reqs/min limit for 32 stocks)
+	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
-
-	lastBrainUpdate := time.Now()
 
 	for range ticker.C {
 		now := time.Now().In(time.FixedZone("IST", 5*60*60+30*60))
 
+		// Refresh Market Sentinel regime check at 09:14 IST
+		if now.Hour() == 9 && now.Minute() == 14 && now.Second() < 25 {
+			loadMarketRegime()
+		}
+
 		// Daily summary ~15:30 after square-off
-		if now.Hour() == 15 && now.Minute() >= 30 && now.Sub(lastDailyReset) >= 24*time.Hour {
+		if now.Hour() == 15 && now.Minute() >= 30 && lastDailyReset.Format("2006-01-02") != now.Format("2006-01-02") {
 			printDailySummary()
 		}
 
@@ -226,20 +242,10 @@ func main() {
 			squareOffAllPositions(now)
 		}
 
-		// Refresh brain.py config every 15 minutes
-		if time.Since(lastBrainUpdate) >= 15*time.Minute {
-			runBrainAndReload()
-			lastBrainUpdate = time.Now()
-		}
-
 		fmt.Printf("\nPolling LTP at %s\n", now.Format("15:04:05"))
 
 		successCount := 0
 		for sym, token := range symbolToToken {
-			if sym == "TATAMOTORS" {
-				continue
-			}
-
 			ltp, err := client.GetLTP("NSE", token)
 			if err != nil {
 				log.Printf("%s LTP error: %v", sym, err)
@@ -251,16 +257,25 @@ func main() {
 
 			successCount++
 
-			updateHighLow(sym, ltp)
-			updateLTPHistory(sym, ltp)
-			checkAllEntries(sym, ltp)
+			// 1. Check exits for any existing open positions first
 			checkLongExit(sym, ltp)
 			checkShortExit(sym, ltp)
+
+			// 2. Append to recent tick history so mean-reversion and quick-drop can examine previous ticks
+			updateLTPHistory(sym, ltp)
+
+			// 3. Check new breakout and mean-reversion entries against established High/Low (active from 09:15 open until 15:00 IST)
+			if now.Hour() < 15 {
+				checkAllEntries(sym, ltp)
+			}
+
+			// 4. Update established High/Low with the latest tick
+			updateHighLow(sym, ltp)
 
 			time.Sleep(200 * time.Millisecond)
 		}
 
-		fmt.Printf("Successfully fetched LTP")
+		fmt.Printf("Successfully fetched LTP for %d stocks\n", successCount)
 		fmt.Println("---")
 	}
 }
@@ -424,6 +439,16 @@ func checkLongExit(sym string, ltp float64) {
 	trailingSL := pos.HighestPrice * (1 - defaultTrailingPercent/100)
 	if ltp <= trailingSL {
 		exitLong(sym, ltp, pos.Qty, "Trailing SL")
+		return
+	}
+
+	// Stagnation Timeout: Exit if trade has gone nowhere after 45 minutes
+	if time.Since(pos.EntryTime) >= 45*time.Minute {
+		pctChange := (ltp - pos.EntryPrice) / pos.EntryPrice
+		if pctChange >= -0.004 && pctChange <= 0.004 {
+			exitLong(sym, ltp, pos.Qty, "Stagnation Timeout (45m flat)")
+			return
+		}
 	}
 }
 
@@ -458,6 +483,16 @@ func checkShortExit(sym string, ltp float64) {
 	trailingSL := pos.LowestPrice * (1 + defaultTrailingPercent/100)
 	if ltp >= trailingSL {
 		exitShort(sym, ltp, pos.Qty, "Trailing SL")
+		return
+	}
+
+	// Stagnation Timeout: Exit if trade has gone nowhere after 45 minutes
+	if time.Since(pos.EntryTime) >= 45*time.Minute {
+		pctChange := (pos.EntryPrice - ltp) / pos.EntryPrice
+		if pctChange >= -0.004 && pctChange <= 0.004 {
+			exitShort(sym, ltp, pos.Qty, "Stagnation Timeout (45m flat)")
+			return
+		}
 	}
 }
 
@@ -466,6 +501,13 @@ func checkShortExit(sym string, ltp float64) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 func printDailySummary() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	lastDailyReset = time.Now().In(time.FixedZone("IST", 5*60*60+30*60))
+	highLow = make(map[string]struct{ High, Low float64 })
+	ltpHistory = make(map[string][]float64)
+
 	if len(tradeHistory) == 0 {
 		logTrade("Daily Summary: No trades executed today")
 		return
@@ -492,30 +534,41 @@ func printDailySummary() {
 	// Reset for next day
 	tradeHistory = nil
 	dailyPnL = 0
-	lastDailyReset = time.Now().Truncate(24 * time.Hour)
 }
 
-func runBrainAndReload() {
-	brainPath := filepath.Join("data", "brain.py")
-
-	cmd := exec.Command("python", brainPath)
-	cmd.Dir = filepath.Dir(brainPath)
-
-	output, err := cmd.CombinedOutput()
+func loadMarketRegime() {
+	regimePath := filepath.Join("data", "regime.json")
+	data, err := os.ReadFile(regimePath)
 	if err != nil {
-		log.Printf("Failed to run brain.py: %v\nOutput: %s", err, string(output))
+		log.Printf("[REGIME] No regime.json found; defaulting to NORMAL (Max Pos: %d, Budget: ₹%.0f)", defaultMaxPositions, defaultBudget)
 		return
 	}
 
-	fmt.Println("brain.py executed successfully - refreshing config...")
-	if err := loadBrainConfig(); err == nil {
-		fmt.Printf("Reloaded config.json - %d strategies\n", len(stockStrategies))
-	} else {
-		log.Printf("Reload failed: %v", err)
+	var r MarketRegime
+	if err := json.Unmarshal(data, &r); err != nil {
+		log.Printf("[REGIME] Error parsing regime.json: %v; maintaining current settings", err)
+		return
 	}
+
+	mu.Lock()
+	currentRegime = r
+	if r.Status == "CRISIS" {
+		defaultMaxPositions = 0
+		defaultBudget = 0.0
+	} else if r.Status == "CAUTION" {
+		defaultMaxPositions = 1
+		defaultBudget = 10000.0
+	} else {
+		defaultMaxPositions = 3
+		defaultBudget = 15000.0
+	}
+	mu.Unlock()
+
+	logTrade(fmt.Sprintf("[SENTINEL] Regime: [%s] %s | Score: %d/100 | Max Pos: %d | Sizing: ₹%.0f | %s",
+		r.Color, r.Status, r.RiskScore, defaultMaxPositions, defaultBudget, r.Reason))
 }
 
-func loadBrainConfig() error {
+func loadStrategyConfig() error {
 	dataPath := filepath.Join("data", "config.json")
 	data, err := os.ReadFile(dataPath)
 	if err != nil {
@@ -588,10 +641,25 @@ func updateLTPHistory(sym string, ltp float64) {
 func checkAllEntries(sym string, ltp float64) {
 	mu.Lock()
 	totalOpen := len(longPositions) + len(shortPositions)
+	currentLoss := dailyPnL
+	regimeStatus := currentRegime.Status
+	maxPos := defaultMaxPositions
 	mu.Unlock()
 
-	if totalOpen >= defaultMaxPositions {
-		fmt.Printf("Max positions (%d/%d) reached - skipping %s\n", totalOpen, defaultMaxPositions, sym)
+	// Circuit Breaker: Daily loss floor (-₹750)
+	if currentLoss <= -750.0 {
+		fmt.Printf("[CIRCUIT BREAKER] Daily loss floor -₹750 reached (Current: ₹%.2f). New entries halted for today.\n", currentLoss)
+		return
+	}
+
+	// Market Shield: Crisis detected
+	if regimeStatus == "CRISIS" || maxPos == 0 {
+		fmt.Printf("[MARKET SHIELD] Crisis active - 0 trades allowed (%s)\n", currentRegime.Reason)
+		return
+	}
+
+	if totalOpen >= maxPos {
+		fmt.Printf("Max positions (%d/%d) reached - skipping %s\n", totalOpen, maxPos, sym)
 		return
 	}
 
@@ -674,19 +742,43 @@ func checkQuickDropShort(sym string, ltp float64) {
 }
 
 func squareOffAllPositions(now time.Time) {
-	fmt.Printf("Square-off time (%s) - exiting all\n", now.Format("15:04"))
+	type toCloseItem struct {
+		sym    string
+		qty    int
+		isLong bool
+	}
+	var items []toCloseItem
 
 	mu.Lock()
-	defer mu.Unlock()
-
 	for sym, pos := range longPositions {
-		ltp, _ := client.GetLTP("NSE", symbolToToken[sym])
-		exitLong(sym, ltp, pos.Qty, "EOD Square-off")
+		if pos.Qty > 0 {
+			items = append(items, toCloseItem{sym: sym, qty: pos.Qty, isLong: true})
+		}
+	}
+	for sym, pos := range shortPositions {
+		if pos.Qty > 0 {
+			items = append(items, toCloseItem{sym: sym, qty: pos.Qty, isLong: false})
+		}
+	}
+	mu.Unlock()
+
+	if len(items) == 0 {
+		return
 	}
 
-	for sym, pos := range shortPositions {
-		ltp, _ := client.GetLTP("NSE", symbolToToken[sym])
-		exitShort(sym, ltp, pos.Qty, "EOD Square-off")
+	fmt.Printf("Square-off time (%s) - exiting %d open positions\n", now.Format("15:04"), len(items))
+
+	for _, item := range items {
+		ltp, err := client.GetLTP("NSE", symbolToToken[item.sym])
+		if err != nil {
+			log.Printf("Square-off LTP failed for %s: %v", item.sym, err)
+			continue
+		}
+		if item.isLong {
+			exitLong(item.sym, ltp, item.qty, "EOD Square-off")
+		} else {
+			exitShort(item.sym, ltp, item.qty, "EOD Square-off")
+		}
 	}
 
 	fmt.Println("All positions squared off.")
@@ -706,8 +798,10 @@ func loadSavedTokenMap() bool {
 		return false
 	}
 
-	if len(saved.Map) != len(stocks.Tickers) {
-		return false
+	for _, sym := range stocks.Tickers {
+		if _, ok := saved.Map[sym]; !ok {
+			return false
+		}
 	}
 
 	symbolToToken = saved.Map

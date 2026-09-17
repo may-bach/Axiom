@@ -1,0 +1,6 @@
+# Flattrade Token Helper
+
+This script automates fetching a fresh request_code via browser simulation.
+- Never commit real credentials!
+- Use environment variables or a secure vault.
+- Run once daily after 6 AM IST.

@@ -30,3 +30,19 @@ data/state.json
 # Editor/IDE
 # .idea/
 # .vscode/
+
+__pycache__/
+logs/
+*.env
+token_helper/*.pyc
+data/fresh_request_code.txt
+*.key
+*.pem
+axiom_linux
+axiom.exe
+axiom
+data/regime.json
+data/trades_ledger.csv
+data/ledger.html
+data/ledger_summary.md
+

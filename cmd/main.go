@@ -125,6 +125,52 @@ func logTrade(msg string) {
 func logTradeRecord(trade TradeRecord) {
 	tradeHistory = append(tradeHistory, trade)
 	dailyPnL += trade.PnL
+	go appendToLedgerCSV(trade)
+}
+
+func appendToLedgerCSV(trade TradeRecord) {
+	ledgerPath := filepath.Join("data", "trades_ledger.csv")
+	os.MkdirAll("data", 0755)
+
+	needsHeader := false
+	if _, err := os.Stat(ledgerPath); os.IsNotExist(err) {
+		needsHeader = true
+	}
+
+	f, err := os.OpenFile(ledgerPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	if needsHeader {
+		f.WriteString("Date,EntryTime,ExitTime,Symbol,Direction,Qty,EntryPrice,ExitPrice,PnL,ReturnPct,Reason\n")
+	}
+
+	retPct := 0.0
+	if trade.EntryPrice > 0 {
+		if trade.Direction == "LONG" {
+			retPct = ((trade.ExitPrice - trade.EntryPrice) / trade.EntryPrice) * 100
+		} else {
+			retPct = ((trade.EntryPrice - trade.ExitPrice) / trade.EntryPrice) * 100
+		}
+	}
+
+	cleanReason := strings.ReplaceAll(trade.Reason, ",", ";")
+	line := fmt.Sprintf("%s,%s,%s,%s,%s,%d,%.2f,%.2f,%.2f,%.2f%%,%s\n",
+		trade.ExitTime.Format("2006-01-02"),
+		trade.EntryTime.Format("15:04:05"),
+		trade.ExitTime.Format("15:04:05"),
+		trade.Symbol,
+		trade.Direction,
+		trade.Qty,
+		trade.EntryPrice,
+		trade.ExitPrice,
+		trade.PnL,
+		retPct,
+		cleanReason,
+	)
+	f.WriteString(line)
 }
 
 func main() {

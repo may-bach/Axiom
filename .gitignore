@@ -45,4 +45,6 @@ data/regime.json
 data/trades_ledger.csv
 data/ledger.html
 data/ledger_summary.md
+data/account.json
+data/*archive*
 

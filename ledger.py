@@ -17,6 +17,12 @@ from pathlib import Path
 import re
 import sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = Path("/home/opc/Axiom") if Path("/home/opc/Axiom").exists() else Path(".")
 DATA_DIR = ROOT / "data"
 LOGS_DIR = ROOT / "logs"
@@ -24,8 +30,23 @@ TRADES_LOG = LOGS_DIR / "trades.log"
 LEDGER_CSV = DATA_DIR / "trades_ledger.csv"
 SUMMARY_MD = DATA_DIR / "ledger_summary.md"
 LEDGER_HTML = DATA_DIR / "ledger.html"
+ACCOUNT_JSON = DATA_DIR / "account.json"
 
-STARTING_CAPITAL = 10000.00
+
+def get_account_info():
+    init_cap = 10000.00
+    cur_bal = 10000.00
+    last_updated = "N/A"
+    if ACCOUNT_JSON.exists():
+        try:
+            with open(ACCOUNT_JSON, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                init_cap = float(d.get("initial_capital", 10000.00))
+                cur_bal = float(d.get("current_balance", 10000.00))
+                last_updated = str(d.get("last_updated", "N/A"))
+        except Exception:
+            pass
+    return init_cap, cur_bal, last_updated
 
 
 def backfill_from_trades_log():
@@ -136,8 +157,54 @@ def load_all_trades():
 
 
 def analyze_performance(trades):
+    starting_cap, cur_bal, last_updated = get_account_info()
     if not trades:
-        return None
+        return {
+            "starting_capital": starting_cap,
+            "ending_capital": cur_bal,
+            "net_pnl": 0.0,
+            "roi_pct": 0.0,
+            "total_trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "breakeven": 0,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+            "win_loss_ratio": 0.0,
+            "max_win": 0.0,
+            "max_loss": 0.0,
+            "max_drawdown": 0.0,
+            "max_drawdown_pct": 0.0,
+            "trading_days": 0,
+            "avg_trades_per_day": 0.0,
+            "daily_breakdown": {},
+            "gates": {
+                "Gate 1: Sample Size (>= 30 Trades)": {
+                    "status": "IN PROGRESS",
+                    "current": "0/30 trades",
+                    "ok": False,
+                },
+                "Gate 2: Profit Factor (>= 1.40)": {
+                    "status": "IN PROGRESS",
+                    "current": "0.00",
+                    "ok": False,
+                },
+                "Gate 3: Max Drawdown (< -10% / -₹1,000)": {
+                    "status": "PASS",
+                    "current": "₹0.00 (0.0%)",
+                    "ok": True,
+                },
+                "Gate 4: Win/Loss Payoff Ratio (>= 1.20)": {
+                    "status": "IN PROGRESS",
+                    "current": "0.00x",
+                    "ok": False,
+                },
+            },
+            "ready_for_live": False,
+            "last_updated": last_updated,
+        }
 
     total_trades = len(trades)
     wins = [t for t in trades if t["PnL"] > 0]
@@ -159,7 +226,7 @@ def analyze_performance(trades):
     max_loss = min((t["PnL"] for t in trades), default=0.0)
 
     # Calculate equity curve & drawdown
-    equity = STARTING_CAPITAL
+    equity = starting_cap
     peak = equity
     max_dd = 0.0
     max_dd_pct = 0.0
@@ -188,7 +255,7 @@ def analyze_performance(trades):
         if dd_pct > max_dd_pct:
             max_dd_pct = dd_pct
 
-    roi_pct = (net_pnl / STARTING_CAPITAL) * 100
+    roi_pct = (net_pnl / starting_cap) * 100
     trading_days = len(daily_map)
     avg_trades_per_day = (total_trades / trading_days) if trading_days > 0 else 0.0
 
@@ -219,7 +286,7 @@ def analyze_performance(trades):
     ready_for_live = all(g["ok"] for g in gates.values())
 
     return {
-        "starting_capital": STARTING_CAPITAL,
+        "starting_capital": starting_cap,
         "ending_capital": equity,
         "net_pnl": net_pnl,
         "roi_pct": roi_pct,
@@ -282,13 +349,16 @@ def generate_markdown_report(trades, stats):
         lines.append(f"| **{d}** | {d_info['trades']} | {d_info['wins']}W / {d_info['losses']}L | ₹{d_info['pnl']:+,.2f} | ₹{running_pnl:+,.2f} |")
 
     lines.append("\n## 4. Complete Trade History Log")
-    lines.append("| Date | Exit Time | Symbol | Side | Qty | Entry Price | Exit Price | P&L (₹) | Return (%) | Exit Reason |")
-    lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
-    for t in trades:
-        ret = t["ReturnPct"]
-        pnl_val = t["PnL"]
-        pnl_str = f"**+₹{pnl_val:.2f}**" if pnl_val > 0 else f"₹{pnl_val:.2f}"
-        lines.append(f"| {t['Date']} | {t['ExitTime']} | **{t['Symbol']}** | {t['Direction']} | {t['Qty']} | ₹{t['EntryPrice']:.2f} | ₹{t['ExitPrice']:.2f} | {pnl_str} | {ret} | {t['Reason']} |")
+    if not trades:
+        lines.append("*No trades recorded yet. Clean slate initialized for tomorrow's session.*")
+    else:
+        lines.append("| Date | Exit Time | Symbol | Side | Qty | Entry Price | Exit Price | P&L (₹) | Return (%) | Exit Reason |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
+        for t in trades:
+            ret = t["ReturnPct"]
+            pnl_val = t["PnL"]
+            pnl_str = f"**+₹{pnl_val:.2f}**" if pnl_val > 0 else f"₹{pnl_val:.2f}"
+            lines.append(f"| {t['Date']} | {t['ExitTime']} | **{t['Symbol']}** | {t['Direction']} | {t['Qty']} | ₹{t['EntryPrice']:.2f} | ₹{t['ExitPrice']:.2f} | {pnl_str} | {ret} | {t['Reason']} |")
 
     content = "\n".join(lines)
     SUMMARY_MD.write_text(content, encoding="utf-8")
@@ -302,40 +372,59 @@ def generate_html_dashboard(trades, stats):
 
     # Generate daily rows
     daily_rows_html = ""
-    cum_pnl = 0.0
-    for d, d_info in sorted(stats["daily_breakdown"].items()):
-        cum_pnl += d_info["pnl"]
-        day_color = "#34d399" if d_info["pnl"] >= 0 else "#f87171"
-        cum_color = "#34d399" if cum_pnl >= 0 else "#f87171"
-        daily_rows_html += f"""
-        <tr class="border-b border-zinc-800 hover:bg-zinc-800/50 transition">
-            <td class="py-3 px-4 font-mono font-medium text-zinc-300">{d}</td>
-            <td class="py-3 px-4 text-center">{d_info['trades']}</td>
-            <td class="py-3 px-4 text-center font-mono">{d_info['wins']}W / {d_info['losses']}L</td>
-            <td class="py-3 px-4 text-right font-mono font-bold" style="color: {day_color}">₹{d_info['pnl']:+,.2f}</td>
-            <td class="py-3 px-4 text-right font-mono font-bold" style="color: {cum_color}">₹{cum_pnl:+,.2f}</td>
+    if not stats["daily_breakdown"]:
+        daily_rows_html = """
+        <tr>
+            <td colspan="5" class="py-4 text-center text-zinc-500 font-mono text-xs">
+                No closed days yet in current cycle.
+            </td>
         </tr>
         """
+    else:
+        cum_pnl = 0.0
+        for d, d_info in sorted(stats["daily_breakdown"].items()):
+            cum_pnl += d_info["pnl"]
+            day_color = "#34d399" if d_info["pnl"] >= 0 else "#f87171"
+            cum_color = "#34d399" if cum_pnl >= 0 else "#f87171"
+            daily_rows_html += f"""
+            <tr class="border-b border-zinc-800 hover:bg-zinc-800/50 transition">
+                <td class="py-3 px-4 font-mono font-medium text-zinc-300">{d}</td>
+                <td class="py-3 px-4 text-center">{d_info['trades']}</td>
+                <td class="py-3 px-4 text-center font-mono">{d_info['wins']}W / {d_info['losses']}L</td>
+                <td class="py-3 px-4 text-right font-mono font-bold" style="color: {day_color}">₹{d_info['pnl']:+,.2f}</td>
+                <td class="py-3 px-4 text-right font-mono font-bold" style="color: {cum_color}">₹{cum_pnl:+,.2f}</td>
+            </tr>
+            """
 
     # Generate trade rows
     trade_rows_html = ""
-    for t in reversed(trades):
-        is_win = t["PnL"] > 0
-        pnl_col = "#34d399" if is_win else "#f87171"
-        side_badge = "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" if t["Direction"] == "LONG" else "bg-rose-500/20 text-rose-400 border-rose-500/30"
-        trade_rows_html += f"""
-        <tr class="border-b border-zinc-800/60 hover:bg-zinc-800/40 transition text-sm">
-            <td class="py-3 px-4 text-zinc-400 font-mono text-xs">{t['Date']}<br><span class="text-zinc-500">{t['ExitTime']}</span></td>
-            <td class="py-3 px-4 font-bold text-white tracking-wide">{t['Symbol']}</td>
-            <td class="py-3 px-4 text-center"><span class="px-2 py-0.5 rounded text-xs border font-mono font-semibold {side_badge}">{t['Direction']}</span></td>
-            <td class="py-3 px-4 text-right font-mono text-zinc-300">{t['Qty']}</td>
-            <td class="py-3 px-4 text-right font-mono text-zinc-400">₹{t['EntryPrice']:.2f}</td>
-            <td class="py-3 px-4 text-right font-mono text-zinc-300">₹{t['ExitPrice']:.2f}</td>
-            <td class="py-3 px-4 text-right font-mono font-bold" style="color: {pnl_col}">₹{t['PnL']:+,.2f}</td>
-            <td class="py-3 px-4 text-right font-mono text-xs" style="color: {pnl_col}">{t['ReturnPct']}</td>
-            <td class="py-3 px-4 text-zinc-400 text-xs">{t['Reason']}</td>
+    if not trades:
+        trade_rows_html = """
+        <tr>
+            <td colspan="9" class="py-8 text-center text-zinc-500 font-mono text-sm">
+                Clean slate initialized with ₹10,000 baseline capital.<br>
+                <span class="text-zinc-600 text-xs">Ready for tomorrow's trading session (09:15 - 15:30 IST).</span>
+            </td>
         </tr>
         """
+    else:
+        for t in reversed(trades):
+            is_win = t["PnL"] > 0
+            pnl_col = "#34d399" if is_win else "#f87171"
+            side_badge = "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" if t["Direction"] == "LONG" else "bg-rose-500/20 text-rose-400 border-rose-500/30"
+            trade_rows_html += f"""
+            <tr class="border-b border-zinc-800/60 hover:bg-zinc-800/40 transition text-sm">
+                <td class="py-3 px-4 text-zinc-400 font-mono text-xs">{t['Date']}<br><span class="text-zinc-500">{t['ExitTime']}</span></td>
+                <td class="py-3 px-4 font-bold text-white tracking-wide">{t['Symbol']}</td>
+                <td class="py-3 px-4 text-center"><span class="px-2 py-0.5 rounded text-xs border font-mono font-semibold {side_badge}">{t['Direction']}</span></td>
+                <td class="py-3 px-4 text-right font-mono text-zinc-300">{t['Qty']}</td>
+                <td class="py-3 px-4 text-right font-mono text-zinc-400">₹{t['EntryPrice']:.2f}</td>
+                <td class="py-3 px-4 text-right font-mono text-zinc-300">₹{t['ExitPrice']:.2f}</td>
+                <td class="py-3 px-4 text-right font-mono font-bold" style="color: {pnl_col}">₹{t['PnL']:+,.2f}</td>
+                <td class="py-3 px-4 text-right font-mono text-xs" style="color: {pnl_col}">{t['ReturnPct']}</td>
+                <td class="py-3 px-4 text-zinc-400 text-xs">{t['Reason']}</td>
+            </tr>
+            """
 
     # Gate cards html
     gates_html = ""
@@ -498,17 +587,23 @@ def print_cli_summary(stats):
     print("=" * 65)
     print("        AXIOM MULTI-WEEK PERFORMANCE AUDIT LEDGER        ")
     print("=" * 65)
-    print(f"Starting Capital         : ₹{stats['starting_capital']:,.2f}")
-    print(f"Current Simulated Balance: ₹{stats['ending_capital']:,.2f} ({stats['roi_pct']:+.2f}%)")
-    print(f"Total Net P&L            : ₹{stats['net_pnl']:+,.2f}")
+    print(f"Starting Baseline Capital: ₹{stats['starting_capital']:,.2f}")
+    print(f"Current Active Budget    : ₹{stats['ending_capital']:,.2f} ({stats['roi_pct']:+.2f}%)")
+    print(f"Purchasing Power (5x MIS): ₹{stats['ending_capital'] * 5.0:,.2f}")
+    print(f"Dynamic Daily Loss Floor : -₹{stats['ending_capital'] * 0.075:,.2f} (-7.5%)")
+    print(f"Total Net Realized P&L   : ₹{stats['net_pnl']:+,.2f}")
     print("-" * 65)
-    print(f"Total Completed Trades   : {stats['total_trades']}")
-    print(f"Win / Loss Record        : {stats['wins']} Wins / {stats['losses']} Losses")
-    print(f"Win Rate                 : {stats['win_rate']:.1f}%")
-    print(f"Profit Factor            : {stats['profit_factor']:.2f}")
-    print(f"Payoff Ratio             : {stats['win_loss_ratio']:.2f}x (Avg Win ₹{stats['avg_win']:.0f} vs Loss ₹{stats['avg_loss']:.0f})")
-    print(f"Largest Win / Loss       : +₹{stats['max_win']:.2f} / ₹{stats['max_loss']:.2f}")
-    print(f"Max Peak-to-Trough DD    : ₹{stats['max_drawdown']:.2f} ({stats['max_drawdown_pct']:.1f}%)")
+    if stats["total_trades"] == 0:
+        print("Status                   : CLEAN SLATE RESET — READY FOR TOMORROW")
+        print("Completed Trades Today   : 0 (Awaiting market session: 09:15 - 15:30 IST)")
+    else:
+        print(f"Total Completed Trades   : {stats['total_trades']}")
+        print(f"Win / Loss Record        : {stats['wins']} Wins / {stats['losses']} Losses")
+        print(f"Win Rate                 : {stats['win_rate']:.1f}%")
+        print(f"Profit Factor            : {stats['profit_factor']:.2f}")
+        print(f"Payoff Ratio             : {stats['win_loss_ratio']:.2f}x (Avg Win ₹{stats['avg_win']:.0f} vs Loss ₹{stats['avg_loss']:.0f})")
+        print(f"Largest Win / Loss       : +₹{stats['max_win']:.2f} / ₹{stats['max_loss']:.2f}")
+        print(f"Max Peak-to-Trough DD    : ₹{stats['max_drawdown']:.2f} ({stats['max_drawdown_pct']:.1f}%)")
     print("-" * 65)
     print("LIVE READINESS GATES STATUS:")
     for g, info in stats["gates"].items():
@@ -522,10 +617,6 @@ def print_cli_summary(stats):
 
 def main():
     trades = load_all_trades()
-    if not trades:
-        print("No completed trades found yet in ledger or trades.log.")
-        return
-
     stats = analyze_performance(trades)
     generate_markdown_report(trades, stats)
     generate_html_dashboard(trades, stats)

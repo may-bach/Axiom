@@ -26,6 +26,32 @@ except Exception:
     echo ""
 fi
 
+# Show Account Capital & Compounded Budget
+if [ -f data/account.json ]; then
+    python3 -c "
+import json
+try:
+    with open('data/account.json') as f:
+        a = json.load(f)
+    init_cap = float(a.get('initial_capital', 10000.0))
+    cur_bal = float(a.get('current_balance', 10000.0))
+    peak = float(a.get('peak_balance', 10000.0))
+    pnl = float(a.get('total_realized_pnl', 0.0))
+    ret_pct = ((cur_bal - init_cap) / init_cap) * 100 if init_cap > 0 else 0.0
+    print('=== ACCOUNT BALANCE & COMPOUNDING BUDGET ===')
+    print(f'Starting Baseline Capital : ₹{init_cap:,.2f}')
+    print(f'Current Active Budget     : ₹{cur_bal:,.2f} ({ret_pct:+.2f}%)')
+    print(f'Purchasing Power (5x MIS) : ₹{cur_bal * 5.0:,.2f}')
+    print(f'Dynamic Daily Loss Floor  : -₹{cur_bal * 0.075:,.2f} (-7.5%)')
+    print(f'Peak Balance              : ₹{peak:,.2f}')
+    print(f'Total Realized P&L        : ₹{pnl:+,.2f}')
+    print(f'Last Compounded           : {a.get(\"last_updated\", \"N/A\")}')
+    print('')
+except Exception:
+    pass
+"
+fi
+
 # Show Market Sentinel Regime
 if [ -f data/regime.json ]; then
     python3 -c "

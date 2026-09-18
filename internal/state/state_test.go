@@ -74,3 +74,59 @@ func TestStoreAtomicClose(t *testing.T) {
 		t.Fatalf("expected second close to fail, but succeeded")
 	}
 }
+
+func TestStoreAccountCompounding(t *testing.T) {
+	store := NewStore()
+
+	// Initial baseline
+	acc := store.GetAccount()
+	if acc.InitialCapital != 10000.0 || acc.CurrentBalance != 10000.0 {
+		t.Fatalf("expected 10000 baseline, got %+v", acc)
+	}
+
+	lossFloor := store.GetDailyLossLimit()
+	if lossFloor != -750.0 {
+		t.Fatalf("expected -750 loss floor, got %.2f", lossFloor)
+	}
+
+	// Normal regime budget test (1.5x balance per trade at lev 1.0)
+	b1 := store.GetPositionBudget(1.0)
+	if b1 != 15000.0 {
+		t.Fatalf("expected 15000 budget, got %.2f", b1)
+	}
+	b15 := store.GetPositionBudget(1.5)
+	if b15 != 22500.0 {
+		t.Fatalf("expected 22500 budget, got %.2f", b15)
+	}
+
+	// Day 1: realize +500 PnL
+	updatedAcc, applied := store.UpdateAccountDaily(500.0, "2026-09-19", "2026-09-19 15:30:00 IST")
+	if !applied {
+		t.Fatalf("expected daily update to be applied")
+	}
+	if updatedAcc.CurrentBalance != 10500.0 || updatedAcc.TotalRealizedPnL != 500.0 {
+		t.Fatalf("unexpected balance after Day 1: %+v", updatedAcc)
+	}
+
+	// Idempotency: same date should not compound twice
+	_, applied2 := store.UpdateAccountDaily(500.0, "2026-09-19", "2026-09-19 15:35:00 IST")
+	if applied2 {
+		t.Fatalf("expected second update on same date to be ignored")
+	}
+	if store.GetAccount().CurrentBalance != 10500.0 {
+		t.Fatalf("balance should remain 10500.0")
+	}
+
+	// Dynamic loss floor on compounded capital
+	newLossFloor := store.GetDailyLossLimit()
+	expectedFloor := -0.075 * 10500.0 // -787.5
+	if newLossFloor != expectedFloor {
+		t.Fatalf("expected loss floor %.2f, got %.2f", expectedFloor, newLossFloor)
+	}
+
+	// Day 2 sizing should scale up
+	b2 := store.GetPositionBudget(1.0)
+	if b2 != 10500.0*1.5 {
+		t.Fatalf("expected Day 2 budget %.2f, got %.2f", 10500.0*1.5, b2)
+	}
+}

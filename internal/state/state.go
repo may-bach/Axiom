@@ -18,6 +18,7 @@ type Store struct {
 	dailyPnL       float64
 	lastDailyReset time.Time
 	regime         models.MarketRegime
+	account        models.AccountState
 }
 
 // NewStore initializes a new state Store.
@@ -35,6 +36,13 @@ func NewStore() *Store {
 			MaxPositions:   3,
 			PositionBudget: 15000.0,
 			DailyLossLimit: -750.0,
+		},
+		account: models.AccountState{
+			InitialCapital:   10000.0,
+			CurrentBalance:   10000.0,
+			PeakBalance:      10000.0,
+			TotalRealizedPnL: 0.0,
+			LastUpdated:      time.Now().Format("2006-01-02 15:04:05 IST"),
 		},
 	}
 }
@@ -277,4 +285,72 @@ func (s *Store) GetRegime() models.MarketRegime {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.regime
+}
+
+// ----------------------------------------------------------------------
+// Account & Capital Compounding
+// ----------------------------------------------------------------------
+
+func (s *Store) SetAccount(acc models.AccountState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.account = acc
+}
+
+func (s *Store) GetAccount() models.AccountState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.account
+}
+
+func (s *Store) UpdateAccountDaily(dailyPnL float64, dateStr, updatedTime string) (models.AccountState, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.account.LastCompoundedDate == dateStr {
+		return s.account, false
+	}
+
+	s.account.CurrentBalance += dailyPnL
+	s.account.TotalRealizedPnL += dailyPnL
+	if s.account.CurrentBalance > s.account.PeakBalance {
+		s.account.PeakBalance = s.account.CurrentBalance
+	}
+	s.account.LastCompoundedDate = dateStr
+	s.account.LastUpdated = updatedTime
+	return s.account, true
+}
+
+func (s *Store) GetPositionBudget(leverage float64) float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.regime.Status == "CRISIS" || s.regime.MaxPositions == 0 {
+		return 0.0
+	}
+
+	bal := s.account.CurrentBalance
+	if bal <= 0 {
+		bal = 10000.0
+	}
+
+	if s.regime.Status == "CAUTION" {
+		// 1 position conservative sizing
+		return bal * 1.0 * leverage
+	}
+
+	// Normal regime: 1.5x balance sizing per trade (for 2-3 concurrent trades under 5x margin)
+	return bal * 1.5 * leverage
+}
+
+func (s *Store) GetDailyLossLimit() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	bal := s.account.CurrentBalance
+	if bal <= 0 {
+		bal = 10000.0
+	}
+	// Hard 7.5% daily stop-loss floor
+	return -0.075 * bal
 }

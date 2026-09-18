@@ -116,51 +116,51 @@ func placeOrder(sym, token, side, orderType string, qty int, requiredMargin floa
 // ----------------------------------------------------------------------
 
 func enterLong(sym, token string, ltp float64, leverage float64) {
-	regime := store.GetRegime()
-	activeBudget := regime.PositionBudget
-	if activeBudget <= 0 {
-		activeBudget = defaultBudget
-	}
-
-	effectiveBudget := activeBudget * leverage
-	qty := int(effectiveBudget / ltp)
-	if qty < 1 {
-		logTrade(fmt.Sprintf("LONG skipped - insufficient budget %s (lev %.1f)", sym, leverage))
+	effectiveBudget := store.GetPositionBudget(leverage)
+	if effectiveBudget <= 0 {
 		return
 	}
 
-	err := placeOrder(sym, token, "BUY", "MKT", qty, effectiveBudget)
+	qty := int(effectiveBudget / ltp)
+	if qty < 1 {
+		logTrade(fmt.Sprintf("LONG skipped - insufficient budget %s (lev %.1f, budget ₹%.0f)", sym, leverage, effectiveBudget))
+		return
+	}
+
+	// 5x MIS margin requirement (20% of gross trade value)
+	requiredMargin := effectiveBudget / 5.0
+	err := placeOrder(sym, token, "BUY", "MKT", qty, requiredMargin)
 	if err != nil {
 		logTrade(fmt.Sprintf("LONG ENTRY FAILED %s: %v", sym, err))
 		return
 	}
 
 	store.OpenLong(sym, ltp, qty, time.Now())
-	logTrade(fmt.Sprintf("ENTRY LONG %s @ %.2f Qty: %d Leverage: %.1f", sym, ltp, qty, leverage))
+	logTrade(fmt.Sprintf("ENTRY LONG %s @ %.2f Qty: %d Leverage: %.1f Budget: ₹%.0f (Margin: ₹%.0f)", sym, ltp, qty, leverage, effectiveBudget, requiredMargin))
 }
 
 func enterShort(sym, token string, ltp float64, leverage float64) {
-	regime := store.GetRegime()
-	activeBudget := regime.PositionBudget
-	if activeBudget <= 0 {
-		activeBudget = defaultBudget
-	}
-
-	effectiveBudget := activeBudget * leverage
-	qty := int(effectiveBudget / ltp)
-	if qty < 1 {
-		logTrade(fmt.Sprintf("SHORT skipped - insufficient budget %s (lev %.1f)", sym, leverage))
+	effectiveBudget := store.GetPositionBudget(leverage)
+	if effectiveBudget <= 0 {
 		return
 	}
 
-	err := placeOrder(sym, token, "SELL", "MKT", qty, effectiveBudget)
+	qty := int(effectiveBudget / ltp)
+	if qty < 1 {
+		logTrade(fmt.Sprintf("SHORT skipped - insufficient budget %s (lev %.1f, budget ₹%.0f)", sym, leverage, effectiveBudget))
+		return
+	}
+
+	// 5x MIS margin requirement (20% of gross trade value)
+	requiredMargin := effectiveBudget / 5.0
+	err := placeOrder(sym, token, "SELL", "MKT", qty, requiredMargin)
 	if err != nil {
 		logTrade(fmt.Sprintf("SHORT ENTRY FAILED %s: %v", sym, err))
 		return
 	}
 
 	store.OpenShort(sym, ltp, qty, time.Now())
-	logTrade(fmt.Sprintf("ENTRY SHORT %s @ %.2f Qty: %d Leverage: %.1f", sym, ltp, qty, leverage))
+	logTrade(fmt.Sprintf("ENTRY SHORT %s @ %.2f Qty: %d Leverage: %.1f Budget: ₹%.0f (Margin: ₹%.0f)", sym, ltp, qty, leverage, effectiveBudget, requiredMargin))
 }
 
 // ----------------------------------------------------------------------
@@ -263,9 +263,10 @@ func checkAllEntries(sym, token string, ltp float64) {
 		return
 	}
 
-	// Circuit breaker check
+	// Circuit breaker check (dynamic -7.5% of current account balance)
+	lossLimit := store.GetDailyLossLimit()
 	currentPnL := store.GetDailyPnL()
-	if currentPnL <= -750.0 {
+	if currentPnL <= lossLimit {
 		return
 	}
 
@@ -339,18 +340,28 @@ func squareOffAllPositions(now time.Time) {
 func printDailySummary(now time.Time) {
 	history := store.GetTradeHistory()
 	pnl := store.GetDailyPnL()
+	todayStr := now.Format("2006-01-02")
+	timeStr := now.Format("2006-01-02 15:04:05 IST")
+
+	acc, applied := store.UpdateAccountDaily(pnl, todayStr, timeStr)
+	if applied {
+		saveAccountState(acc)
+	}
 
 	if len(history) == 0 {
-		logTrade("Daily Summary: No trades executed today")
+		logTrade(fmt.Sprintf("Daily Summary (%s): No trades executed today | Compounded Capital: ₹%.2f (Purchasing Power 5x: ₹%.2f)",
+			todayStr, acc.CurrentBalance, acc.CurrentBalance*5.0))
 		store.ResetDaily(now)
 		return
 	}
 
 	logTrade("═══════════════════════════════════════════════════════")
 	logTrade("DAILY TRADE & P&L SUMMARY")
-	logTrade(fmt.Sprintf("Date: %s", now.Format("2006-01-02")))
+	logTrade(fmt.Sprintf("Date: %s", todayStr))
 	logTrade(fmt.Sprintf("Total Trades: %d", len(history)))
-	logTrade(fmt.Sprintf("Net P&L: ₹%.2f", pnl))
+	logTrade(fmt.Sprintf("Net Realized P&L: ₹%.2f", pnl))
+	logTrade(fmt.Sprintf("Compounded Account Balance: ₹%.2f (Purchasing Power 5x: ₹%.2f)", acc.CurrentBalance, acc.CurrentBalance*5.0))
+	logTrade(fmt.Sprintf("Next Day Dynamic Loss Floor: ₹%.2f (-7.5%%)", store.GetDailyLossLimit()))
 
 	var longPnL, shortPnL float64
 	for _, t := range history {
@@ -437,12 +448,57 @@ func saveTokenMap() {
 	fmt.Println("Token map saved to data/token_map.json")
 }
 
+func loadAccountState() {
+	path := filepath.Join("data", "account.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("[ACCOUNT] No account.json found; initializing baseline ₹10,000 capital")
+		acc := models.AccountState{
+			InitialCapital:     10000.0,
+			CurrentBalance:     10000.0,
+			PeakBalance:        10000.0,
+			TotalRealizedPnL:   0.0,
+			LastUpdated:        time.Now().Format("2006-01-02 15:04:05 IST"),
+			LastCompoundedDate: "",
+		}
+		store.SetAccount(acc)
+		saveAccountState(acc)
+		return
+	}
+
+	var acc models.AccountState
+	if err := json.Unmarshal(data, &acc); err != nil {
+		log.Printf("[ACCOUNT] Error parsing account.json: %v; initializing baseline", err)
+		return
+	}
+
+	store.SetAccount(acc)
+	logTrade(fmt.Sprintf("[ACCOUNT] Initial Capital: ₹%.2f | Balance: ₹%.2f | 5x Purchasing Power: ₹%.2f | Loss Floor: ₹%.2f",
+		acc.InitialCapital, acc.CurrentBalance, acc.CurrentBalance*5.0, store.GetDailyLossLimit()))
+}
+
+func saveAccountState(acc models.AccountState) {
+	path := filepath.Join("data", "account.json")
+	os.MkdirAll(filepath.Dir(path), 0755)
+	data, err := json.MarshalIndent(acc, "", "  ")
+	if err != nil {
+		log.Printf("[ACCOUNT] Error serializing account state: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		log.Printf("[ACCOUNT] Error writing account.json: %v", err)
+		return
+	}
+	logTrade(fmt.Sprintf("[ACCOUNT] Saved compounded balance: ₹%.2f (5x power: ₹%.2f)", acc.CurrentBalance, acc.CurrentBalance*5.0))
+}
+
 // ----------------------------------------------------------------------
 // Main Application Loop
 // ----------------------------------------------------------------------
 
 func main() {
 	config.Load()
+	loadAccountState()
 	fmt.Println("Axiom Protocol Initializing...")
 
 	// 1. Authenticate with Flattrade
@@ -556,8 +612,9 @@ func main() {
 		}
 
 		// Circuit breaker warning
-		if store.GetDailyPnL() <= -750.0 {
-			fmt.Printf("[%s] CIRCUIT BREAKER: Daily loss floor (-₹750) reached. New entries halted.\n", now.Format("15:04:05"))
+		lossLimit := store.GetDailyLossLimit()
+		if store.GetDailyPnL() <= lossLimit {
+			fmt.Printf("[%s] CIRCUIT BREAKER: Daily loss floor (₹%.2f) reached. New entries halted.\n", now.Format("15:04:05"), lossLimit)
 		}
 
 		fmt.Printf("\nPolling LTP at %s\n", now.Format("15:04:05"))

@@ -60,3 +60,13 @@ type MarketRegime struct {
 	VIXChangePct      float64  `json:"vix_change_pct"`
 	NiftyLTP          float64  `json:"nifty_ltp"`
 }
+
+// AccountState tracks capital balance, compounding, and drawdown across days
+type AccountState struct {
+	InitialCapital     float64 `json:"initial_capital"`
+	CurrentBalance     float64 `json:"current_balance"`
+	PeakBalance        float64 `json:"peak_balance"`
+	TotalRealizedPnL   float64 `json:"total_realized_pnl"`
+	LastUpdated        string  `json:"last_updated"`
+	LastCompoundedDate string  `json:"last_compounded_date"`
+}

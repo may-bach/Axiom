@@ -191,3 +191,49 @@ func PlaceOrder(sym, token, buySell, orderType string, qty int) error {
 	fmt.Printf("Order placed successfully for %s - Order ID: %s\n", sym, or.NorenOrdNo)
 	return nil
 }
+
+type LimitsResponse struct {
+	Stat       string `json:"stat"`
+	Cash       string `json:"cash"`
+	MarginUsed string `json:"marginused"`
+	Payin      string `json:"payin"`
+	Emsg       string `json:"emsg"`
+}
+
+// GetLimits queries Flattrade for current available cash margin.
+func GetLimits() (float64, error) {
+	uid := os.Getenv("FLAT_USER_ID")
+	payload := map[string]string{
+		"actid": uid,
+	}
+
+	respBytes, err := MakeRequest("/Limits", payload)
+	if err != nil {
+		return 0, err
+	}
+
+	var lr LimitsResponse
+	if err := json.Unmarshal(respBytes, &lr); err != nil {
+		return 0, fmt.Errorf("limits unmarshal failed: %v - raw: %s", err, string(respBytes))
+	}
+
+	if lr.Stat != "Ok" {
+		return 0, fmt.Errorf("limits query failed: %s", lr.Emsg)
+	}
+
+	cashVal, err := strconv.ParseFloat(strings.TrimSpace(lr.Cash), 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid cash value '%s': %v", lr.Cash, err)
+	}
+
+	return cashVal, nil
+}
+
+// CheckAvailableMargin verifies available cash against required margin.
+func CheckAvailableMargin(required float64) (bool, float64, error) {
+	available, err := GetLimits()
+	if err != nil {
+		return false, 0, err
+	}
+	return available >= required, available, nil
+}

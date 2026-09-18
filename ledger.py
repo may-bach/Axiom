@@ -256,12 +256,12 @@ def generate_markdown_report(trades, stats):
     lines.append(f"| **Starting Capital** | ₹{stats['starting_capital']:,.2f} | ₹10,000.00 | Baseline |")
     lines.append(f"| **Current Simulated Equity** | ₹{stats['ending_capital']:,.2f} | -- | **{stats['roi_pct']:+.2f}%** |")
     lines.append(f"| **Net Realized P&L** | ₹{stats['net_pnl']:+,.2f} | Positive | {'🟢 PROFIT' if stats['net_pnl'] >= 0 else '🔴 LOSS'} |")
-    lines.append(f"| **Total Closed Trades** | {stats['total_trades']} | $\ge$ 30 | {'🟢 OK' if stats['total_trades'] >= 30 else '🟡 ACCUMULATING'} |")
-    lines.append(f"| **Win / Loss Ratio** | {stats['wins']}W / {stats['losses']}L ({stats['win_rate']:.1f}%) | $\ge$ 40% | {'🟢 PASS' if stats['win_rate'] >= 40 else '🔴 MONITOR'} |")
-    lines.append(f"| **Profit Factor** | {stats['profit_factor']:.2f} | $\ge$ 1.40 | {'🟢 PASS' if stats['profit_factor'] >= 1.40 else '🔴 FAIL'} |")
-    lines.append(f"| **Average Win vs Loss** | ₹{stats['avg_win']:.2f} / ₹{stats['avg_loss']:.2f} | $\ge$ 1.2x | **{stats['win_loss_ratio']:.2f}x** |")
-    lines.append(f"| **Largest Single Trade** | Win: +₹{stats['max_win']:.2f} \| Loss: ₹{stats['max_loss']:.2f} | -- | -- |")
-    lines.append(f"| **Max Peak-to-Trough Drawdown** | ₹{stats['max_drawdown']:.2f} ({stats['max_drawdown_pct']:.1f}%) | $\le$ ₹1,000.00 (10%) | {'🟢 SAFE' if stats['max_drawdown'] <= 1000 else '🔴 BREACHED'} |\n")
+    lines.append(f"| **Total Closed Trades** | {stats['total_trades']} | >= 30 | {'🟢 OK' if stats['total_trades'] >= 30 else '🟡 ACCUMULATING'} |")
+    lines.append(f"| **Win / Loss Ratio** | {stats['wins']}W / {stats['losses']}L ({stats['win_rate']:.1f}%) | >= 40% | {'🟢 PASS' if stats['win_rate'] >= 40 else '🔴 MONITOR'} |")
+    lines.append(f"| **Profit Factor** | {stats['profit_factor']:.2f} | >= 1.40 | {'🟢 PASS' if stats['profit_factor'] >= 1.40 else '🔴 FAIL'} |")
+    lines.append(f"| **Average Win vs Loss** | ₹{stats['avg_win']:.2f} / ₹{stats['avg_loss']:.2f} | >= 1.2x | **{stats['win_loss_ratio']:.2f}x** |")
+    lines.append(f"| **Largest Single Trade** | Win: +₹{stats['max_win']:.2f} / Loss: ₹{stats['max_loss']:.2f} | -- | -- |")
+    lines.append(f"| **Max Peak-to-Trough Drawdown** | ₹{stats['max_drawdown']:.2f} ({stats['max_drawdown_pct']:.1f}%) | <= ₹1,000.00 (10%) | {'🟢 SAFE' if stats['max_drawdown'] <= 1000 else '🔴 BREACHED'} |\n")
 
     lines.append("## 2. Live Capital Readiness Checklist (The 4 Gates)")
     for gate_name, info in stats["gates"].items():

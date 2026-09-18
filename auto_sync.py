@@ -8,6 +8,7 @@ Headless, zero-browser: authenticates directly with Flattrade REST endpoints.
 import argparse
 from datetime import datetime, timezone, timedelta
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -24,12 +25,43 @@ sys.stderr.reconfigure(line_buffering=True)
 ROOT = Path("/home/opc/Axiom")
 ENV_PATH = ROOT / ".env"
 CODE_FILE = ROOT / "data" / "fresh_request_code.txt"
+ALERT_FILE = ROOT / "data" / "auth_alert.json"
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def log(msg: str):
-    now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
-    print(f"[{now_ist}] {msg}", flush=True)
+	now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
+	print(f"[{now_ist}] {msg}", flush=True)
+
+
+def clear_auth_alert():
+	if ALERT_FILE.exists():
+		try:
+			ALERT_FILE.unlink()
+		except Exception:
+			pass
+
+
+def trigger_auth_alert(err_msg: str):
+	now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S IST")
+	alert_payload = {
+		"timestamp": now_ist,
+		"status": "AUTH_FAILED",
+		"error": err_msg,
+		"action_required": "Flattrade morning authentication failed. Check credentials or broker endpoints.",
+	}
+	ALERT_FILE.parent.mkdir(parents=True, exist_ok=True)
+	ALERT_FILE.write_text(json.dumps(alert_payload, indent=2), encoding="utf-8")
+	log(f"[CRITICAL ALERT] Auth failure written to {ALERT_FILE}")
+
+	env = load_env()
+	webhook = env.get("ALERT_WEBHOOK_URL")
+	if webhook:
+		try:
+			requests.post(webhook, json={"text": f"[AXIOM ALERT] Flattrade Auth Failed at {now_ist}: {err_msg}"}, timeout=5)
+			log(f"Alert successfully sent to configured webhook")
+		except Exception as e:
+			log(f"Failed to post to webhook: {e}")
 
 
 def load_env():
@@ -212,9 +244,11 @@ def main():
         if code:
             update_env_code(code)
             restart_axiom()
+            clear_auth_alert()
             return 0
         else:
             log("Single attempt failed.")
+            trigger_auth_alert("Single auth attempt failed.")
             return 1
 
     max_retries = args.retries
@@ -224,17 +258,22 @@ def main():
         if code:
             update_env_code(code)
             restart_axiom()
+            clear_auth_alert()
             log("=== Axiom Token Sync Completed Successfully! ===")
             return 0
 
         if abort:
-            log("Aborting retry loop due to fatal authentication error.")
+            err_msg = "Aborting retry loop due to fatal authentication error (broker rejection)."
+            log(err_msg)
+            trigger_auth_alert(err_msg)
             return 1
 
         log(f"Waiting {args.interval}s before next attempt...")
         time.sleep(args.interval)
 
-    log("ERROR: Reached max retries without obtaining token.")
+    err_msg = f"Reached max retries ({max_retries}) without obtaining valid session token."
+    log(f"ERROR: {err_msg}")
+    trigger_auth_alert(err_msg)
     return 1
 
 

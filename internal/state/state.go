@@ -2,24 +2,279 @@ package state
 
 import (
 	"sync"
+	"time"
 
 	"github.com/may-bach/Axiom/internal/models"
 )
 
-// Store provides thread-safe access to bot state
+// Store provides encapsulated, thread-safe access to all in-memory bot state.
 type Store struct {
 	mu             sync.RWMutex
-	LongPositions  map[string]models.Position
-	ShortPositions map[string]models.Position
-	TradeHistory   []models.TradeRecord
-	DailyPnL       float64
+	highLow        map[string]models.HighLow
+	ltpHistory     map[string][]float64
+	longPositions  map[string]models.Position
+	shortPositions map[string]models.Position
+	tradeHistory   []models.TradeRecord
+	dailyPnL       float64
+	lastDailyReset time.Time
+	regime         models.MarketRegime
 }
 
-// NewStore initializes a new state Store
+// NewStore initializes a new state Store.
 func NewStore() *Store {
 	return &Store{
-		LongPositions:  make(map[string]models.Position),
-		ShortPositions: make(map[string]models.Position),
-		TradeHistory:   make([]models.TradeRecord, 0),
+		highLow:        make(map[string]models.HighLow),
+		ltpHistory:     make(map[string][]float64),
+		longPositions:  make(map[string]models.Position),
+		shortPositions: make(map[string]models.Position),
+		tradeHistory:   make([]models.TradeRecord, 0),
+		lastDailyReset: time.Now().Truncate(24 * time.Hour),
+		regime: models.MarketRegime{
+			Status:         "NORMAL",
+			Color:          "GREEN",
+			MaxPositions:   3,
+			PositionBudget: 15000.0,
+			DailyLossLimit: -750.0,
+		},
 	}
+}
+
+// ----------------------------------------------------------------------
+// High / Low
+// ----------------------------------------------------------------------
+
+func (s *Store) UpdateHighLow(sym string, ltp float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	hl, exists := s.highLow[sym]
+	if !exists {
+		hl = models.HighLow{High: ltp, Low: ltp}
+	} else {
+		if hl.High == 0 || ltp > hl.High {
+			hl.High = ltp
+		}
+		if hl.Low == 0 || ltp < hl.Low {
+			hl.Low = ltp
+		}
+	}
+	s.highLow[sym] = hl
+}
+
+func (s *Store) GetHighLow(sym string) (models.HighLow, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	hl, ok := s.highLow[sym]
+	return hl, ok
+}
+
+// ----------------------------------------------------------------------
+// Tick History
+// ----------------------------------------------------------------------
+
+func (s *Store) AppendHistory(sym string, ltp float64, window int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	hist := s.ltpHistory[sym]
+	hist = append(hist, ltp)
+	if len(hist) > window {
+		hist = hist[1:]
+	}
+	s.ltpHistory[sym] = hist
+}
+
+func (s *Store) GetHistory(sym string) []float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	hist := s.ltpHistory[sym]
+	res := make([]float64, len(hist))
+	copy(res, hist)
+	return res
+}
+
+// ----------------------------------------------------------------------
+// Positions
+// ----------------------------------------------------------------------
+
+func (s *Store) GetOpenCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.longPositions) + len(s.shortPositions)
+}
+
+func (s *Store) HasPosition(sym string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, isLong := s.longPositions[sym]
+	_, isShort := s.shortPositions[sym]
+	return isLong || isShort
+}
+
+func (s *Store) GetLongPosition(sym string) (models.Position, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	pos, ok := s.longPositions[sym]
+	return pos, ok
+}
+
+func (s *Store) GetShortPosition(sym string) (models.Position, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	pos, ok := s.shortPositions[sym]
+	return pos, ok
+}
+
+func (s *Store) OpenLong(sym string, ltp float64, qty int, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.longPositions[sym] = models.Position{
+		Symbol:       sym,
+		Direction:    "LONG",
+		EntryPrice:   ltp,
+		HighestPrice: ltp,
+		LowestPrice:  ltp,
+		Qty:          qty,
+		EntryTime:    t,
+	}
+}
+
+func (s *Store) OpenShort(sym string, ltp float64, qty int, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shortPositions[sym] = models.Position{
+		Symbol:       sym,
+		Direction:    "SHORT",
+		EntryPrice:   ltp,
+		HighestPrice: ltp,
+		LowestPrice:  ltp,
+		Qty:          qty,
+		EntryTime:    t,
+	}
+}
+
+func (s *Store) UpdateLongHighest(sym string, ltp float64) (models.Position, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pos, ok := s.longPositions[sym]
+	if !ok {
+		return pos, false
+	}
+	if ltp > pos.HighestPrice {
+		pos.HighestPrice = ltp
+		s.longPositions[sym] = pos
+	}
+	return pos, true
+}
+
+func (s *Store) UpdateShortLowest(sym string, ltp float64) (models.Position, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pos, ok := s.shortPositions[sym]
+	if !ok {
+		return pos, false
+	}
+	if ltp < pos.LowestPrice {
+		pos.LowestPrice = ltp
+		s.shortPositions[sym] = pos
+	}
+	return pos, true
+}
+
+// CloseLong atomically removes and returns the long position.
+func (s *Store) CloseLong(sym string) (models.Position, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pos, ok := s.longPositions[sym]
+	if ok {
+		delete(s.longPositions, sym)
+	}
+	return pos, ok
+}
+
+// CloseShort atomically removes and returns the short position.
+func (s *Store) CloseShort(sym string) (models.Position, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pos, ok := s.shortPositions[sym]
+	if ok {
+		delete(s.shortPositions, sym)
+	}
+	return pos, ok
+}
+
+func (s *Store) GetAllOpenPositions() []models.Position {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	all := make([]models.Position, 0, len(s.longPositions)+len(s.shortPositions))
+	for _, p := range s.longPositions {
+		all = append(all, p)
+	}
+	for _, p := range s.shortPositions {
+		all = append(all, p)
+	}
+	return all
+}
+
+// ----------------------------------------------------------------------
+// Trade History & Daily P&L
+// ----------------------------------------------------------------------
+
+func (s *Store) RecordTrade(t models.TradeRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tradeHistory = append(s.tradeHistory, t)
+	s.dailyPnL += t.PnL
+}
+
+func (s *Store) GetDailyPnL() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.dailyPnL
+}
+
+func (s *Store) GetTradeHistory() []models.TradeRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make([]models.TradeRecord, len(s.tradeHistory))
+	copy(res, s.tradeHistory)
+	return res
+}
+
+func (s *Store) ResetDaily(resetTime time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastDailyReset = resetTime
+	s.tradeHistory = nil
+	s.dailyPnL = 0
+	s.highLow = make(map[string]models.HighLow)
+	s.ltpHistory = make(map[string][]float64)
+}
+
+func (s *Store) GetLastReset() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastDailyReset
+}
+
+// ----------------------------------------------------------------------
+// Market Regime
+// ----------------------------------------------------------------------
+
+func (s *Store) SetRegime(r models.MarketRegime) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.regime = r
+}
+
+func (s *Store) GetRegime() models.MarketRegime {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.regime
 }

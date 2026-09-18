@@ -7,6 +7,25 @@ echo "=========================================="
 echo "Report Time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo ""
 
+# Check for Morning Authentication Alert
+if [ -f data/auth_alert.json ]; then
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "  CRITICAL ALERT: AUTHENTICATION FAILED!  "
+    python3 -c "
+import json
+try:
+    with open('data/auth_alert.json') as f:
+        d = json.load(f)
+    print('  Timestamp :', d.get('timestamp'))
+    print('  Error     :', d.get('error'))
+    print('  Action    :', d.get('action_required'))
+except Exception:
+    pass
+"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo ""
+fi
+
 # Show Market Sentinel Regime
 if [ -f data/regime.json ]; then
     python3 -c "

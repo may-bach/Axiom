@@ -588,7 +588,7 @@ func main() {
 		// NSE Normal Trading Hours: 09:15 to 15:30 IST
 		// ------------------------------------------------------------------
 		isMarketOpen := (hour == 9 && min >= 15) || (hour > 9 && hour < 15) || (hour == 15 && min <= 30)
-		canEnter := (hour == 9 && min >= 15) || (hour > 9 && hour < 15)
+		canEnter := (hour == 9 && min >= 30) || (hour > 9 && hour < 15)
 
 		// Pre-market sentinel refresh at 09:14 IST
 		if hour == 9 && min == 14 && now.Second() < 25 {

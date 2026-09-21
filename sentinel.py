@@ -16,7 +16,13 @@ import sys
 import xml.etree.ElementTree as ET
 import requests
 
-ROOT = Path("/home/opc/Axiom")
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+ROOT = Path("/home/opc/Axiom") if Path("/home/opc/Axiom").exists() else Path(".")
 DATA_DIR = ROOT / "data"
 REGIME_FILE = DATA_DIR / "regime.json"
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -234,27 +240,44 @@ def evaluate_regime():
     score, has_direct_crisis, flagged = analyze_sentiment(headlines, vix)
 
     # Classification logic:
-    # 🔴 CRISIS: War/Crash keyword OR VIX >= 25.0 OR total score >= 70
-    # 🟡 CAUTION: Macro event, VIX 17-25, rate decision, chop, or score between 25 and 69
-    # 🟢 NORMAL: Clean sentiment, VIX < 16, score < 25
-    if has_direct_crisis or (vix and vix >= 25.0) or score >= 70:
+    # 🔴 CRISIS (Full Shield / 100% Cash):
+    #    Triggered ONLY on genuine systemic panic:
+    #    1. VIX >= 22.0 (Extreme volatility shock)
+    #    2. Direct crisis headline CONFIRMED by elevated VIX >= 16.0 (or VIX feed missing)
+    #    3. Total composite risk score >= 75
+    # 🟡 CAUTION (Conservative Single Position / ₹10k size):
+    #    1. Crisis headlines flagged, but VIX is calm (< 16.0) -> Geopolitical noise without panic
+    #    2. VIX >= 17.0 (Elevated chop) or VIX < 12.0 (Sluggish low-volatility consolidation)
+    #    3. Macro events (Fed, RBI, election, inflation) or score >= 25
+    # 🟢 NORMAL (Full Breakout / 3 positions / ₹15k size):
+    #    Clean sentiment, VIX between 12.0 and 17.0, risk score < 25
+    confirmed_crisis = has_direct_crisis and (vix is None or vix >= 16.0)
+    extreme_vix_panic = vix is not None and vix >= 22.0
+    extreme_score = score >= 75
+
+    if confirmed_crisis or extreme_vix_panic or extreme_score:
         status = "CRISIS"
         color = "RED"
         max_pos = 0
         budget = 0.0
-        reason = "Severe macro crisis or high volatility shock. Market Shield Active: Trading disabled today."
-    elif (vix and vix >= 17.5) or score >= 25:
+        reason = f"Confirmed macro crisis or volatility shock (VIX: {vix if vix else 'N/A'}, Score: {score}). Market Shield Active: Trading disabled today."
+    elif (has_direct_crisis and vix and vix < 16.0) or (vix and (vix >= 17.0 or vix < 12.0)) or score >= 25:
         status = "CAUTION"
         color = "YELLOW"
         max_pos = 1
         budget = 10000.0
-        reason = "Macro event or elevated chop expected. Caution Mode: Max 1 conservative position, ₹10k size."
+        if has_direct_crisis and vix and vix < 16.0:
+            reason = f"Geopolitical headline flagged, but India VIX is calm ({vix:.2f} < 16). Caution Mode: Max 1 position, Rs.10k size."
+        elif vix and vix < 12.0:
+            reason = f"Low volatility consolidation (India VIX {vix:.2f} < 12.0). Caution Mode: Max 1 position to avoid chop."
+        else:
+            reason = f"Macro event or elevated chop expected (Score: {score}). Caution Mode: Max 1 position, Rs.10k size."
     else:
         status = "NORMAL"
         color = "GREEN"
         max_pos = 3
         budget = 15000.0
-        reason = "Market sentiment calm and trending. Full Breakout Mode: Up to 3 positions, ₹15k size."
+        reason = "Market sentiment calm and trending. Full Breakout Mode: Up to 3 positions, Rs.15k size."
 
     regime_data = {
         "date": date_str,

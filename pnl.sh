@@ -65,6 +65,9 @@ try:
     max_pos = r.get('max_positions', 0)
     sizing = r.get('position_budget', 0.0)
     directive = r.get('reason', '')
+    theme = r.get('macro_theme', '')
+    theme_sum = r.get('theme_summary', '')
+    directives = r.get('stock_directives', {})
     vix = r.get('india_vix')
     vix_chg = r.get('vix_change_pct', 0.0)
     nifty = r.get('nifty_ltp')
@@ -72,8 +75,22 @@ try:
     print(f'Status     : [{col}] {status} (Risk Score: {score}/100)')
     if vix:
         print(f'India VIX  : {vix:.2f} ({vix_chg:+.2f}%) | Nifty: {nifty}')
+    if theme:
+        print(f'Macro Theme: {theme}')
+        if theme_sum:
+            print(f'Theme Note : {theme_sum}')
     print(f'Max Pos    : {max_pos} concurrent | Sizing: ₹{sizing:.0f}')
     print(f'Directive  : {directive}')
+    if directives:
+        longs = [s for s, d in directives.items() if d == 'LONG_ONLY']
+        shorts = [s for s, d in directives.items() if d == 'SHORT_ONLY']
+        blocked = [s for s, d in directives.items() if d == 'BLOCKED']
+        if longs:
+            print(f'  LONG_ONLY  : {\", \".join(longs)}')
+        if shorts:
+            print(f'  SHORT_ONLY : {\", \".join(shorts)}')
+        if blocked:
+            print(f'  BLOCKED    : {\", \".join(blocked)}')
     if r.get('flagged_headlines'):
         print('Headlines  :')
         for h in r['flagged_headlines'][:2]:

@@ -79,3 +79,43 @@ func TestBreakoutSignals(t *testing.T) {
 		t.Fatalf("expected breakdown short entry at 189.0")
 	}
 }
+
+func TestResolveAllowedDirections(t *testing.T) {
+	eng := NewEngine()
+
+	// NEUTRAL with AllowShort = true
+	long, short := eng.ResolveAllowedDirections("NEUTRAL", true)
+	if !long || !short {
+		t.Fatalf("expected both long and short allowed for NEUTRAL, got long=%v, short=%v", long, short)
+	}
+
+	// NEUTRAL with AllowShort = false (e.g. Class C stocks)
+	long, short = eng.ResolveAllowedDirections("NEUTRAL", false)
+	if !long || short {
+		t.Fatalf("expected only long allowed when strat.AllowShort is false, got long=%v, short=%v", long, short)
+	}
+
+	// LONG_ONLY
+	long, short = eng.ResolveAllowedDirections("LONG_ONLY", true)
+	if !long || short {
+		t.Fatalf("expected only long allowed for LONG_ONLY, got long=%v, short=%v", long, short)
+	}
+
+	// SHORT_ONLY
+	long, short = eng.ResolveAllowedDirections("SHORT_ONLY", true)
+	if long || !short {
+		t.Fatalf("expected only short allowed for SHORT_ONLY, got long=%v, short=%v", long, short)
+	}
+
+	// SHORT_ONLY with AllowShort = false -> neither
+	long, short = eng.ResolveAllowedDirections("SHORT_ONLY", false)
+	if long || short {
+		t.Fatalf("expected neither allowed when SHORT_ONLY and strat.AllowShort is false, got long=%v, short=%v", long, short)
+	}
+
+	// BLOCKED
+	long, short = eng.ResolveAllowedDirections("BLOCKED", true)
+	if long || short {
+		t.Fatalf("expected neither allowed for BLOCKED, got long=%v, short=%v", long, short)
+	}
+}

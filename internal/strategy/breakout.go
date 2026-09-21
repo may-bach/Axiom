@@ -61,6 +61,16 @@ func (e *Engine) GetStrategy(sym string) models.StockStrategy {
 	}
 }
 
+// ResolveAllowedDirections evaluates macro directives against stock strategy settings
+func (e *Engine) ResolveAllowedDirections(directive string, stratAllowShort bool) (allowLong bool, allowShort bool) {
+	if directive == "BLOCKED" {
+		return false, false
+	}
+	allowLong = (directive != "SHORT_ONLY")
+	allowShort = stratAllowShort && (directive != "LONG_ONLY")
+	return allowLong, allowShort
+}
+
 // ----------------------------------------------------------------------
 // Entry Signal Evaluations
 // ----------------------------------------------------------------------

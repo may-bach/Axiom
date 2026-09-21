@@ -281,32 +281,40 @@ func checkAllEntries(sym, token string, ltp float64) {
 
 	hist := store.GetHistory(sym)
 	strat := engine.GetStrategy(sym)
+	directive := store.GetStockDirective(sym) // "LONG_ONLY", "SHORT_ONLY", "BLOCKED", "NEUTRAL"
+
+	allowLong, allowShort := engine.ResolveAllowedDirections(directive, strat.AllowShort)
+	if !allowLong && !allowShort {
+		return
+	}
 
 	// Long breakout
-	if shouldEnter, reason := engine.CheckBreakoutLong(sym, ltp, hl, strat.BreakoutLong); shouldEnter {
-		fmt.Printf("%s\n", reason)
-		enterLong(sym, token, ltp, strat.Leverage)
-		return
+	if allowLong {
+		if shouldEnter, reason := engine.CheckBreakoutLong(sym, ltp, hl, strat.BreakoutLong); shouldEnter {
+			fmt.Printf("%s [Directive: %s]\n", reason, directive)
+			enterLong(sym, token, ltp, strat.Leverage)
+			return
+		}
+
+		// Long bounce
+		if shouldEnter, reason := engine.CheckBounceBuy(sym, ltp, hl, hist); shouldEnter {
+			fmt.Printf("%s [Directive: %s]\n", reason, directive)
+			enterLong(sym, token, ltp, strat.Leverage)
+			return
+		}
 	}
 
-	// Long bounce
-	if shouldEnter, reason := engine.CheckBounceBuy(sym, ltp, hl, hist); shouldEnter {
-		fmt.Printf("%s\n", reason)
-		enterLong(sym, token, ltp, strat.Leverage)
-		return
-	}
-
-	if strat.AllowShort {
+	if allowShort {
 		// Short breakdown
 		if shouldEnter, reason := engine.CheckBreakdownShort(sym, ltp, hl, strat.BreakoutShort); shouldEnter {
-			fmt.Printf("%s\n", reason)
+			fmt.Printf("%s [Directive: %s]\n", reason, directive)
 			enterShort(sym, token, ltp, strat.Leverage)
 			return
 		}
 
 		// Short quick drop
 		if shouldEnter, reason := engine.CheckQuickDropShort(sym, ltp, hist); shouldEnter {
-			fmt.Printf("%s\n", reason)
+			fmt.Printf("%s [Directive: %s]\n", reason, directive)
 			enterShort(sym, token, ltp, strat.Leverage)
 			return
 		}
@@ -411,6 +419,15 @@ func loadMarketRegime() {
 	store.SetRegime(r)
 	logTrade(fmt.Sprintf("[SENTINEL] Regime: [%s] %s | Score: %d/100 | Max Pos: %d | Sizing: ₹%.0f | %s",
 		r.Color, r.Status, r.RiskScore, r.MaxPositions, r.PositionBudget, r.Reason))
+	if r.MacroTheme != "" {
+		overrides := 0
+		for _, d := range r.StockDirectives {
+			if d != "NEUTRAL" && d != "" {
+				overrides++
+			}
+		}
+		logTrade(fmt.Sprintf("[SENTINEL] Macro Theme: %s | Active Directives: %d overrides", r.MacroTheme, overrides))
+	}
 }
 
 func loadSavedTokenMap() bool {

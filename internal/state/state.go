@@ -287,6 +287,18 @@ func (s *Store) GetRegime() models.MarketRegime {
 	return s.regime
 }
 
+func (s *Store) GetStockDirective(sym string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.regime.StockDirectives != nil {
+		if directive, ok := s.regime.StockDirectives[sym]; ok && directive != "" {
+			return directive
+		}
+	}
+	return "NEUTRAL"
+}
+
 // ----------------------------------------------------------------------
 // Account & Capital Compounding
 // ----------------------------------------------------------------------

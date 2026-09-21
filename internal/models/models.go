@@ -43,22 +43,24 @@ type HighLow struct {
 	Low  float64 `json:"low"`
 }
 
-// MarketRegime represents macro sentiment and volatility classification
+// MarketRegime represents macro sentiment, volatility classification, and directional directives
 type MarketRegime struct {
-	Date              string   `json:"date"`
-	Timestamp         string   `json:"timestamp"`
-	RiskScore         int      `json:"risk_score"`
-	Status            string   `json:"status"` // NORMAL / CAUTION / CRISIS
-	Color             string   `json:"color"`  // GREEN / YELLOW / RED
-	MaxPositions      int      `json:"max_positions"`
-	PositionBudget    float64  `json:"position_budget"`
-	StagnationMinutes int      `json:"stagnation_minutes"`
-	DailyLossLimit    float64  `json:"daily_loss_limit"`
-	Reason            string   `json:"reason"`
-	FlaggedHeadlines  []string `json:"flagged_headlines"`
-	IndiaVIX          float64  `json:"india_vix"`
-	VIXChangePct      float64  `json:"vix_change_pct"`
-	NiftyLTP          float64  `json:"nifty_ltp"`
+	Date              string            `json:"date"`
+	Timestamp         string            `json:"timestamp"`
+	RiskScore         int               `json:"risk_score"`
+	Status            string            `json:"status"` // NORMAL / CAUTION / CRISIS
+	Color             string            `json:"color"`  // GREEN / YELLOW / RED
+	MaxPositions      int               `json:"max_positions"`
+	PositionBudget    float64           `json:"position_budget"`
+	StagnationMinutes int               `json:"stagnation_minutes"`
+	DailyLossLimit    float64           `json:"daily_loss_limit"`
+	Reason            string            `json:"reason"`
+	FlaggedHeadlines  []string          `json:"flagged_headlines"`
+	IndiaVIX          float64           `json:"india_vix"`
+	VIXChangePct      float64           `json:"vix_change_pct"`
+	NiftyLTP          float64           `json:"nifty_ltp"`
+	MacroTheme        string            `json:"macro_theme"`
+	StockDirectives   map[string]string `json:"stock_directives"`
 }
 
 // AccountState tracks capital balance, compounding, and drawdown across days

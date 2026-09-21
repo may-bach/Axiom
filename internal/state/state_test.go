@@ -130,3 +130,37 @@ func TestStoreAccountCompounding(t *testing.T) {
 		t.Fatalf("expected Day 2 budget %.2f, got %.2f", 10500.0*1.5, b2)
 	}
 }
+
+func TestStockDirectives(t *testing.T) {
+	store := NewStore()
+
+	// Default without directives should return NEUTRAL
+	if dir := store.GetStockDirective("HAL"); dir != "NEUTRAL" {
+		t.Fatalf("expected default NEUTRAL, got %s", dir)
+	}
+
+	// Set regime with directives
+	store.SetRegime(models.MarketRegime{
+		Status:     "CAUTION",
+		MacroTheme: "CRUDE_OIL_SHOCK",
+		StockDirectives: map[string]string{
+			"HAL":      "LONG_ONLY",
+			"TVSMOTOR": "SHORT_ONLY",
+			"TITAGARH": "BLOCKED",
+		},
+	})
+
+	if dir := store.GetStockDirective("HAL"); dir != "LONG_ONLY" {
+		t.Fatalf("expected LONG_ONLY for HAL, got %s", dir)
+	}
+	if dir := store.GetStockDirective("TVSMOTOR"); dir != "SHORT_ONLY" {
+		t.Fatalf("expected SHORT_ONLY for TVSMOTOR, got %s", dir)
+	}
+	if dir := store.GetStockDirective("TITAGARH"); dir != "BLOCKED" {
+		t.Fatalf("expected BLOCKED for TITAGARH, got %s", dir)
+	}
+	// Unmentioned symbol in directives map should return NEUTRAL
+	if dir := store.GetStockDirective("RELIANCE"); dir != "NEUTRAL" {
+		t.Fatalf("expected NEUTRAL for unmentioned RELIANCE, got %s", dir)
+	}
+}

@@ -595,8 +595,10 @@ func main() {
 			loadMarketRegime()
 		}
 
-		// Post-market daily summary at 15:30 IST
-		if hour == 15 && min >= 30 && store.GetLastReset().Format("2006-01-02") != now.Format("2006-01-02") {
+		// Post-market daily summary at 15:30 IST (or anytime post-market if not yet compounded today)
+		todayStr := now.Format("2006-01-02")
+		isPostMarket := (hour == 15 && min >= 30) || hour > 15
+		if isPostMarket && store.GetAccount().LastCompoundedDate != todayStr {
 			printDailySummary(now)
 		}
 

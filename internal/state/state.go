@@ -29,7 +29,7 @@ func NewStore() *Store {
 		longPositions:  make(map[string]models.Position),
 		shortPositions: make(map[string]models.Position),
 		tradeHistory:   make([]models.TradeRecord, 0),
-		lastDailyReset: time.Now().Truncate(24 * time.Hour),
+		lastDailyReset: time.Now().AddDate(0, 0, -1),
 		regime: models.MarketRegime{
 			Status:         "NORMAL",
 			Color:          "GREEN",

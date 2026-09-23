@@ -203,6 +203,28 @@ def get_token():
         return None, False
 
 
+def run_morning_pipeline():
+    log("Running Nifty 500 Dynamic Universe Scanner...")
+    scanner_script = ROOT / "scanner.py"
+    if scanner_script.exists():
+        try:
+            res = subprocess.run([sys.executable, str(scanner_script)], cwd=str(ROOT), capture_output=True, text=True, timeout=120)
+            last_line = res.stdout.strip().splitlines()[-1] if res.stdout.strip().splitlines() else "OK"
+            log(f"Scanner completed: {last_line}")
+        except Exception as e:
+            log(f"Scanner warning: {e}")
+
+    log("Running Sentinel AI Macro & Volatility Gate...")
+    sentinel_script = ROOT / "sentinel.py"
+    if sentinel_script.exists():
+        try:
+            res = subprocess.run([sys.executable, str(sentinel_script)], cwd=str(ROOT), capture_output=True, text=True, timeout=60)
+            last_line = res.stdout.strip().splitlines()[-1] if res.stdout.strip().splitlines() else "OK"
+            log(f"Sentinel completed: {last_line}")
+        except Exception as e:
+            log(f"Sentinel warning: {e}")
+
+
 def restart_axiom():
     log("Restarting Axiom bot on server...")
     stop_script = ROOT / "stop.sh"
@@ -212,6 +234,8 @@ def restart_axiom():
     if stop_script.exists():
         subprocess.run([str(stop_script)], cwd=str(ROOT))
         time.sleep(2)
+
+    run_morning_pipeline()
 
     if start_script.exists():
         subprocess.run([str(start_script)], cwd=str(ROOT))

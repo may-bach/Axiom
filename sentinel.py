@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 import xml.etree.ElementTree as ET
 import requests
 
@@ -245,7 +246,7 @@ def load_sector_matrix():
 
 
 def query_gemini_reasoner(api_key, headlines, vix, nifty, sector_matrix):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    models = ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.6-flash"]
     headers = {"Content-Type": "application/json"}
     top_headlines = [title for _, title in headlines[:25]]
     symbols = list(sector_matrix.keys())
@@ -254,7 +255,8 @@ def query_gemini_reasoner(api_key, headlines, vix, nifty, sector_matrix):
         "You are Axiom's Geopolitical and Macro Risk Engine for the Indian stock market.\n"
         "Analyze the provided headlines and volatility to evaluate actor-target dynamics and economic transmission channels.\n"
         "1. Identify actor (who attacked or took action), target (who was hit), and critical arteries (crude oil transit in Hormuz/Red Sea, defense supply, rate hikes).\n"
-        "2. Choose one macro_theme from: CRUDE_OIL_SHOCK, DEFENSE_ESCALATION, HAWKISH_RATES, COMMODITY_EXPANSION, CALM_TRENDING.\n"
+        "2. Choose one macro_theme from: SYSTEMIC_CRISIS, CRUDE_OIL_SHOCK, DEFENSE_ESCALATION, HAWKISH_RATES, COMMODITY_EXPANSION, CALM_TRENDING.\n"
+        "   - Choose SYSTEMIC_CRISIS ONLY on catastrophic macro shocks (e.g. active declaration of war, missile strikes on regional territory, emergency banking failure, sudden market crash panic).\n"
         "3. Assign directional stance for each stock symbol:\n"
         "   - LONG_ONLY: Stock benefits directly from this theme (e.g. Defense on war, Power on energy crisis)\n"
         "   - SHORT_ONLY: Stock is directly harmed (e.g. Auto on fuel inflation, Realty on rate hikes)\n"
@@ -275,13 +277,23 @@ def query_gemini_reasoner(api_key, headlines, vix, nifty, sector_matrix):
         },
     }
 
-    r = requests.post(url, headers=headers, json=payload, timeout=5)
-    if r.status_code == 200:
-        data = r.json()
-        raw_text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        parsed = json.loads(raw_text)
-        if "macro_theme" in parsed and "stock_directives" in parsed:
-            return parsed
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=12)
+            if r.status_code == 200:
+                data = r.json()
+                raw_text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                parsed = json.loads(raw_text)
+                if "macro_theme" in parsed and "stock_directives" in parsed:
+                    print(f"[SENTINEL] Gemini reasoning successful using {model}")
+                    return parsed
+            elif r.status_code in (500, 503, 504, 429):
+                continue
+            else:
+                print(f"[SENTINEL] Gemini ({model}) HTTP {r.status_code}: {r.text[:200]}")
+        except Exception:
+            continue
     return None
 
 
@@ -411,7 +423,7 @@ def resolve_geopolitical_directives(headlines, vix, nifty):
 
     if api_key:
         try:
-            print("[SENTINEL] Querying Gemini 1.5 Flash for actor-target macro reasoning...")
+            print("[SENTINEL] Querying Gemini 3.6 Flash for actor-target macro reasoning...")
             gemini_res = query_gemini_reasoner(api_key, headlines, vix, nifty, sector_matrix)
             if gemini_res:
                 directives = {sym: "NEUTRAL" for sym in sector_matrix.keys()}
@@ -468,30 +480,41 @@ def evaluate_regime():
     confirmed_crisis = has_direct_crisis and (vix is None or vix >= 16.0)
     extreme_vix_panic = vix is not None and vix >= 22.0
     extreme_score = score >= 75
+    is_gemini_crisis = (macro_theme == "SYSTEMIC_CRISIS")
 
-    if confirmed_crisis or extreme_vix_panic or extreme_score:
+    has_active_theme = (macro_theme not in ("", "CALM_TRENDING") and any(d != "NEUTRAL" for d in stock_directives.values()))
+
+    if confirmed_crisis or extreme_vix_panic or extreme_score or is_gemini_crisis:
         status = "CRISIS"
         color = "RED"
         max_pos = 0
         budget = 0.0
-        reason = f"Confirmed macro crisis or volatility shock (VIX: {vix if vix else 'N/A'}, Score: {score}). Market Shield Active: Trading disabled today."
+        reason = f"Confirmed systemic crisis ({theme_summary if is_gemini_crisis else 'VIX/Headline shock'}). Market Shield Active: Trading halted today."
+    elif vix is not None and vix < 12.0 and not has_active_theme and score < 30:
+        status = "CALM_STAND_DOWN"
+        color = "GRAY"
+        max_pos = 0
+        budget = 0.0
+        reason = f"Volatility Gate: Ultra-low India VIX ({vix:.2f} < 12.0) with zero sector catalyst. Standing down in 100% Cash to prevent chop losses and statutory fee bleeding."
     elif (has_direct_crisis and vix and vix < 16.0) or (vix and (vix >= 17.0 or vix < 12.0)) or score >= 25:
         status = "CAUTION"
         color = "YELLOW"
-        max_pos = 1
+        max_pos = 2
         budget = 10000.0
-        if has_direct_crisis and vix and vix < 16.0:
-            reason = f"Geopolitical headline flagged, but India VIX is calm ({vix:.2f} < 16). Caution Mode: Max 1 position, Rs.10k size."
+        if has_active_theme:
+            reason = f"Low VIX ({vix:.2f} < 12) with active {macro_theme} theme. Caution Mode: Max 2 positions, targeting sector leaders."
+        elif has_direct_crisis and vix and vix < 16.0:
+            reason = f"Geopolitical headline flagged, but India VIX is calm ({vix:.2f} < 16). Caution Mode: Max 2 positions, Rs.10k size."
         elif vix and vix < 12.0:
-            reason = f"Low volatility consolidation (India VIX {vix:.2f} < 12.0). Caution Mode: Max 1 position to avoid chop."
+            reason = f"Low volatility consolidation (India VIX {vix:.2f} < 12.0). Caution Mode: Max 2 positions to avoid chop."
         else:
-            reason = f"Macro event or elevated chop expected (Score: {score}). Caution Mode: Max 1 position, Rs.10k size."
+            reason = f"Macro event or elevated chop expected (Score: {score}). Caution Mode: Max 2 positions, Rs.10k size."
     else:
         status = "NORMAL"
         color = "GREEN"
         max_pos = 3
         budget = 15000.0
-        reason = "Market sentiment calm and trending. Full Breakout Mode: Up to 3 positions, Rs.15k size."
+        reason = f"Market sentiment calm and trending (VIX: {vix:.2f} if vix else 'N/A'). Full Breakout Mode: Up to 3 positions, Rs.15k size."
 
     regime_data = {
         "date": date_str,
@@ -504,7 +527,7 @@ def evaluate_regime():
         "color": color,
         "max_positions": max_pos,
         "position_budget": budget,
-        "stagnation_minutes": 45,
+        "stagnation_minutes": 30,
         "daily_loss_limit": -750.0,
         "reason": reason,
         "flagged_headlines": flagged,
@@ -526,5 +549,38 @@ def evaluate_regime():
     return regime_data
 
 
+def run_loop(interval_minutes=20):
+    """
+    Continuous background monitor loop for market hours.
+    Sleeps outside trading hours, executes scan every `interval_minutes` between 09:10 and 15:35 IST.
+    """
+    print(f"[SENTINEL DAEMON] Starting asynchronous macro monitor loop (interval: {interval_minutes}m)...")
+    while True:
+        try:
+            now_ist = datetime.now(IST)
+            h, m = now_ist.hour, now_ist.minute
+            is_market_day = now_ist.weekday() < 5
+            is_trading_hours = (h == 9 and m >= 10) or (9 < h < 15) or (h == 15 and m <= 35)
+
+            if is_market_day and is_trading_hours:
+                print(f"\n[{now_ist.strftime('%Y-%m-%d %H:%M:%S IST')}] Running scheduled macro & sentiment scan...")
+                evaluate_regime()
+            else:
+                print(f"[{now_ist.strftime('%H:%M:%S IST')}] Outside active market hours (09:10 - 15:35 IST). Waiting for next cycle...")
+        except Exception as e:
+            print(f"[SENTINEL DAEMON ERROR] {e}")
+
+        time.sleep(interval_minutes * 60)
+
+
 if __name__ == "__main__":
-    evaluate_regime()
+    import argparse
+    parser = argparse.ArgumentParser(description="Axiom Sentinel Macro & Geopolitical Risk Engine")
+    parser.add_argument("--daemon", action="store_true", help="Run continuously in background during market hours")
+    parser.add_argument("--interval", type=int, default=20, help="Interval in minutes between scans (default: 20)")
+    args = parser.parse_args()
+
+    if args.daemon:
+        run_loop(args.interval)
+    else:
+        evaluate_regime()

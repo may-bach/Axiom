@@ -164,3 +164,136 @@ func TestStockDirectives(t *testing.T) {
 		t.Fatalf("expected NEUTRAL for unmentioned RELIANCE, got %s", dir)
 	}
 }
+
+func TestSmartAlgoState(t *testing.T) {
+	store := NewStore()
+
+	// Base range initially not established
+	if store.IsBaseEstablished() {
+		t.Fatalf("expected base not established initially")
+	}
+
+	store.SetBaseRange("JINDALSTEL", 1150.0, 1170.0, 1145.0, 1.74)
+	br, ok := store.GetBaseRange("JINDALSTEL")
+	if !ok || br.High != 1170.0 || br.OpenPrice != 1150.0 {
+		t.Fatalf("failed to retrieve base range: %+v", br)
+	}
+
+	store.SetBaseEstablished(true)
+	if !store.IsBaseEstablished() {
+		t.Fatalf("expected base to be established")
+	}
+
+	// RS ranks
+	leaders := map[string]bool{"JINDALSTEL": true, "TATASTEEL": true}
+	laggards := map[string]bool{"TRENT": true, "VOLTAS": true}
+	store.SetRSRanks(leaders, laggards)
+
+	if !store.IsRSLeader("JINDALSTEL") || store.IsRSLeader("TRENT") {
+		t.Fatalf("RS Leader check failed")
+	}
+	if !store.IsRSLaggard("TRENT") || store.IsRSLaggard("JINDALSTEL") {
+		t.Fatalf("RS Laggard check failed")
+	}
+
+	// VWAP
+	store.SetVWAP("JINDALSTEL", 1160.5)
+	if store.GetVWAP("JINDALSTEL") != 1160.5 {
+		t.Fatalf("expected VWAP 1160.5, got %.2f", store.GetVWAP("JINDALSTEL"))
+	}
+
+	// Daily trade lock
+	if store.HasSymbolTradedToday("JINDALSTEL") {
+		t.Fatalf("expected symbol not traded initially")
+	}
+	store.MarkSymbolTradedToday("JINDALSTEL")
+	if !store.HasSymbolTradedToday("JINDALSTEL") {
+		t.Fatalf("expected symbol to be marked as traded")
+	}
+
+	// ResetDaily should wipe base, RS, VWAP, and tradedToday
+	store.ResetDaily(time.Now())
+	if store.IsBaseEstablished() {
+		t.Fatalf("expected baseEstablished to be false after daily reset")
+	}
+	if store.HasSymbolTradedToday("JINDALSTEL") {
+		t.Fatalf("expected tradedToday to be cleared after daily reset")
+	}
+	if store.IsRSLeader("JINDALSTEL") {
+		t.Fatalf("expected RS leaders to be cleared after daily reset")
+	}
+}
+
+func TestCalmStandDownRegime(t *testing.T) {
+	store := NewStore()
+
+	// CALM_STAND_DOWN should return 0 budget
+	store.SetRegime(models.MarketRegime{
+		Status:         "CALM_STAND_DOWN",
+		Color:          "GRAY",
+		MaxPositions:   0,
+		PositionBudget: 0.0,
+	})
+
+	b := store.GetPositionBudget(1.0)
+	if b != 0.0 {
+		t.Fatalf("expected 0.0 budget in CALM_STAND_DOWN, got %.2f", b)
+	}
+
+	reg := store.GetRegime()
+	if reg.Status != "CALM_STAND_DOWN" {
+		t.Fatalf("expected CALM_STAND_DOWN status, got %s", reg.Status)
+	}
+}
+
+func TestMarketBreadth(t *testing.T) {
+	store := NewStore()
+
+	// Initial empty state
+	advPct, avgRet, count := store.GetMarketBreadth()
+	if advPct != 50.0 || count != 0 {
+		t.Fatalf("expected default 50%% and 0 count on empty store, got %.1f%%, %d", advPct, count)
+	}
+
+	// Setup 4 stocks in base range
+	store.SetBaseRange("STOCK_A", 100.0, 105.0, 99.0, 0.0)
+	store.SetBaseRange("STOCK_B", 200.0, 205.0, 198.0, 0.0)
+	store.SetBaseRange("STOCK_C", 100.0, 102.0, 96.0, 0.0)
+	store.SetBaseRange("STOCK_D", 50.0, 52.0, 48.0, 0.0)
+
+	store.UpdateLTP("STOCK_A", 102.0) // +2.0%
+	store.UpdateLTP("STOCK_B", 204.0) // +2.0%
+	store.UpdateLTP("STOCK_C", 97.0)  // -3.0%
+	store.UpdateLTP("STOCK_D", 49.0)  // -2.0%
+
+	advPct, avgRet, count = store.GetMarketBreadth()
+	if count != 4 {
+		t.Fatalf("expected 4 stocks, got %d", count)
+	}
+	if advPct != 50.0 {
+		t.Fatalf("expected 50%% advance, got %.1f%%", advPct)
+	}
+	expectedAvg := (2.0 + 2.0 - 3.0 - 2.0) / 4.0 // -0.25%
+	if avgRet < expectedAvg-0.01 || avgRet > expectedAvg+0.01 {
+		t.Fatalf("expected avg return %.2f%%, got %.2f%%", expectedAvg, avgRet)
+	}
+
+	// Now Stock D rallies: 49 -> 51 (+2.0%)
+	store.UpdateLTP("STOCK_D", 51.0)
+	advPct, avgRet, count = store.GetMarketBreadth()
+	if advPct != 75.0 {
+		t.Fatalf("expected 75%% advance (3/4), got %.1f%%", advPct)
+	}
+	expectedAvg = (2.0 + 2.0 - 3.0 + 2.0) / 4.0 // +0.75%
+	if avgRet < expectedAvg-0.01 || avgRet > expectedAvg+0.01 {
+		t.Fatalf("expected avg return %.2f%%, got %.2f%%", expectedAvg, avgRet)
+	}
+
+	// ResetDaily clears latestLTP and baseRanges
+	store.ResetDaily(time.Now())
+	_, _, countAfter := store.GetMarketBreadth()
+	if countAfter != 0 {
+		t.Fatalf("expected count 0 after daily reset, got %d", countAfter)
+	}
+}
+

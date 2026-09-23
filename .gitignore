@@ -47,4 +47,6 @@ data/ledger.html
 data/ledger_summary.md
 data/account.json
 data/*archive*
+data/intraday_*_cache.json
+data/vix_history*.json
 

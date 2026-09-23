@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/may-bach/Axiom/internal/models"
 	"github.com/may-bach/Axiom/internal/session"
 )
 
@@ -35,6 +36,12 @@ type TouchlineResponse struct {
 	Stat string `json:"stat"`
 	Lp   string `json:"lp"`  // Last Price
 	Ltp  string `json:"ltp"` // fallback
+	Ap   string `json:"ap"`  // Average Price (NSE Intraday VWAP)
+	O    string `json:"o"`   // Open
+	H    string `json:"h"`   // High
+	L    string `json:"l"`   // Low
+	C    string `json:"c"`   // Close
+	V    string `json:"v"`   // Traded Volume
 	Emsg string `json:"emsg"`
 }
 
@@ -150,6 +157,74 @@ func GetLTP(exch, token string) (float64, error) {
 	}
 
 	return ltp, nil
+}
+
+// GetQuoteDetails retrieves full quote including LTP, VWAP (ap), Open, High, Low, and Volume
+func GetQuoteDetails(exch, token string) (models.QuoteData, error) {
+	payload := map[string]string{
+		"exch":  exch,
+		"token": token,
+	}
+
+	respBytes, err := MakeRequest("/GetQuotes", payload)
+	if err != nil {
+		return models.QuoteData{}, err
+	}
+
+	raw := string(respBytes)
+
+	var qr TouchlineResponse
+	if err := json.Unmarshal(respBytes, &qr); err != nil {
+		return models.QuoteData{}, fmt.Errorf("JSON unmarshal failed: %v - raw: %s", err, raw)
+	}
+
+	if qr.Stat != "Ok" {
+		return models.QuoteData{}, fmt.Errorf("GetQuotes failed: stat=%s emsg=%s - raw: %s", qr.Stat, qr.Emsg, raw)
+	}
+
+	priceStr := qr.Lp
+	if priceStr == "" {
+		priceStr = qr.Ltp
+	}
+	if priceStr == "" {
+		return models.QuoteData{}, fmt.Errorf("no price field found - raw: %s", raw)
+	}
+
+	ltp, err := strconv.ParseFloat(priceStr, 64)
+	if err != nil {
+		return models.QuoteData{}, fmt.Errorf("price parse error: %v - value: %s", err, priceStr)
+	}
+
+	vwap, _ := strconv.ParseFloat(qr.Ap, 64)
+	if vwap == 0 {
+		vwap = ltp
+	}
+
+	open, _ := strconv.ParseFloat(qr.O, 64)
+	if open == 0 {
+		open = ltp
+	}
+
+	high, _ := strconv.ParseFloat(qr.H, 64)
+	if high == 0 {
+		high = ltp
+	}
+
+	low, _ := strconv.ParseFloat(qr.L, 64)
+	if low == 0 {
+		low = ltp
+	}
+
+	vol, _ := strconv.ParseInt(qr.V, 10, 64)
+
+	return models.QuoteData{
+		LTP:    ltp,
+		VWAP:   vwap,
+		Open:   open,
+		High:   high,
+		Low:    low,
+		Volume: vol,
+	}, nil
 }
 
 // PlaceOrder - no re-auth inside

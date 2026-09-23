@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -252,14 +253,105 @@ func checkExits(sym, token string, ltp float64) {
 	}
 }
 
+type stockReturn struct {
+	symbol    string
+	returnPct float64
+}
+
+func finalizeBaseAndRSRanks() {
+	if store.IsBaseEstablished() {
+		return
+	}
+
+	baseRanges := store.GetAllBaseRanges()
+	if len(baseRanges) < 5 {
+		return
+	}
+
+	stockReturns := make([]stockReturn, 0, len(baseRanges))
+	for sym, br := range baseRanges {
+		if br.OpenPrice > 0 {
+			stockReturns = append(stockReturns, stockReturn{
+				symbol:    sym,
+				returnPct: br.ReturnPct,
+			})
+		}
+	}
+
+	if len(stockReturns) == 0 {
+		return
+	}
+
+	sort.Slice(stockReturns, func(i, j int) bool {
+		return stockReturns[i].returnPct < stockReturns[j].returnPct
+	})
+
+	n := len(stockReturns)
+	// Dynamic Moving Stock Window:
+	// Strictly focus on the Top 5 momentum leaders for Long and Bottom 5 for Short.
+	// Filter out stagnant stocks: Long candidates must have ReturnPct > +0.20%, Short candidates < -0.20%.
+	windowSize := 5
+	if n < 10 {
+		windowSize = n / 3
+		if windowSize < 1 {
+			windowSize = 1
+		}
+	}
+
+	leaders := make(map[string]bool)
+	laggards := make(map[string]bool)
+
+	leaderSyms := make([]string, 0)
+	laggardSyms := make([]string, 0)
+
+	// Bottom Moving Window (Weakest Laggards)
+	for i := 0; i < windowSize && i < n; i++ {
+		sr := stockReturns[i]
+		if sr.returnPct < -0.20 {
+			laggards[sr.symbol] = true
+			laggardSyms = append(laggardSyms, fmt.Sprintf("%s(%+.2f%%)", sr.symbol, sr.returnPct))
+		}
+	}
+
+	// Top Moving Window (Strongest Leaders)
+	for i := n - windowSize; i < n; i++ {
+		if i >= 0 {
+			sr := stockReturns[i]
+			if sr.returnPct > 0.20 {
+				leaders[sr.symbol] = true
+				leaderSyms = append(leaderSyms, fmt.Sprintf("%s(%+.2f%%)", sr.symbol, sr.returnPct))
+			}
+		}
+	}
+
+	store.SetRSRanks(leaders, laggards)
+	store.SetBaseEstablished(true)
+
+	logTrade("═══════════════════════════════════════════════════════")
+	logTrade(fmt.Sprintf("[MOVING STOCK WINDOW] 09:35 IST Active Window Frozen (%d universe stocks)", n))
+	logTrade(fmt.Sprintf("Top 5 Moving Leaders (Long Window): %s", strings.Join(leaderSyms, ", ")))
+	logTrade(fmt.Sprintf("Bottom 5 Moving Laggards (Short Window): %s", strings.Join(laggardSyms, ", ")))
+	logTrade("═══════════════════════════════════════════════════════")
+}
+
 func checkAllEntries(sym, token string, ltp float64) {
 	if store.HasPosition(sym) {
 		return
 	}
 
+	// Pillar 4: Max 1 trade per symbol per day
+	if store.HasSymbolTradedToday(sym) {
+		return
+	}
+
 	regime := store.GetRegime()
 	maxPos := regime.MaxPositions
-	if maxPos == 0 || regime.Status == "CRISIS" {
+	if maxPos == 0 || regime.Status == "CRISIS" || regime.Status == "CALM_STAND_DOWN" {
+		return
+	}
+
+	// Institutional Guard: Cap at max 3 total trades per day to prevent churn and statutory fee drag
+	if len(store.GetTradeHistory()) >= 3 {
 		return
 	}
 
@@ -274,12 +366,16 @@ func checkAllEntries(sym, token string, ltp float64) {
 		return
 	}
 
-	hl, ok := store.GetHighLow(sym)
-	if !ok {
+	baseRange, ok := store.GetBaseRange(sym)
+	if !ok || baseRange.High == 0 {
 		return
 	}
 
-	hist := store.GetHistory(sym)
+	vwap := store.GetVWAP(sym)
+	if vwap == 0 {
+		vwap = ltp
+	}
+
 	strat := engine.GetStrategy(sym)
 	directive := store.GetStockDirective(sym) // "LONG_ONLY", "SHORT_ONLY", "BLOCKED", "NEUTRAL"
 
@@ -288,34 +384,33 @@ func checkAllEntries(sym, token string, ltp float64) {
 		return
 	}
 
-	// Long breakout
-	if allowLong {
-		if shouldEnter, reason := engine.CheckBreakoutLong(sym, ltp, hl, strat.BreakoutLong); shouldEnter {
-			fmt.Printf("%s [Directive: %s]\n", reason, directive)
-			enterLong(sym, token, ltp, strat.Leverage)
-			return
-		}
+	isRSLeader := store.IsRSLeader(sym)
+	isRSLaggard := store.IsRSLaggard(sym)
 
-		// Long bounce
-		if shouldEnter, reason := engine.CheckBounceBuy(sym, ltp, hl, hist); shouldEnter {
-			fmt.Printf("%s [Directive: %s]\n", reason, directive)
+	advPct, avgRet, totalCount := store.GetMarketBreadth()
+
+	// Long base breakout: requires RS Leader AND ltp > vwap AND ltp >= baseHigh * (1 + buf) AND Trend Alignment
+	if allowLong && isRSLeader {
+		trendOK, trendReason := engine.CheckTrendAlignment("LONG", advPct, avgRet, totalCount)
+		if !trendOK {
+			log.Printf("[TREND GATE] %s LONG blocked: %s", sym, trendReason)
+		} else if shouldEnter, reason := engine.CheckBaseBreakoutLong(sym, ltp, baseRange.High, vwap, isRSLeader, strat.BreakoutLong); shouldEnter {
+			logTrade(fmt.Sprintf("%s [Directive: %s, RS Leader, %s]", reason, directive, trendReason))
 			enterLong(sym, token, ltp, strat.Leverage)
+			store.MarkSymbolTradedToday(sym)
 			return
 		}
 	}
 
-	if allowShort {
-		// Short breakdown
-		if shouldEnter, reason := engine.CheckBreakdownShort(sym, ltp, hl, strat.BreakoutShort); shouldEnter {
-			fmt.Printf("%s [Directive: %s]\n", reason, directive)
+	// Short base breakdown: requires RS Laggard AND ltp < vwap AND ltp <= baseLow * (1 - buf) AND Trend Alignment
+	if allowShort && isRSLaggard {
+		trendOK, trendReason := engine.CheckTrendAlignment("SHORT", advPct, avgRet, totalCount)
+		if !trendOK {
+			log.Printf("[TREND GATE] %s SHORT blocked: %s", sym, trendReason)
+		} else if shouldEnter, reason := engine.CheckBaseBreakdownShort(sym, ltp, baseRange.Low, vwap, isRSLaggard, strat.BreakoutShort); shouldEnter {
+			logTrade(fmt.Sprintf("%s [Directive: %s, RS Laggard, %s]", reason, directive, trendReason))
 			enterShort(sym, token, ltp, strat.Leverage)
-			return
-		}
-
-		// Short quick drop
-		if shouldEnter, reason := engine.CheckQuickDropShort(sym, ltp, hist); shouldEnter {
-			fmt.Printf("%s [Directive: %s]\n", reason, directive)
-			enterShort(sym, token, ltp, strat.Leverage)
+			store.MarkSymbolTradedToday(sym)
 			return
 		}
 	}
@@ -402,8 +497,34 @@ func loadStrategyConfig() error {
 	return nil
 }
 
+var lastRegimeMtime time.Time
+
+func checkAndReloadMarketRegime() {
+	regimePath := filepath.Join("data", "regime.json")
+	info, err := os.Stat(regimePath)
+	if err != nil {
+		return
+	}
+	if info.ModTime().After(lastRegimeMtime) {
+		oldRegime := store.GetRegime()
+		loadMarketRegime()
+		newRegime := store.GetRegime()
+
+		// Midday emergency crisis shutdown check
+		if newRegime.Status == "CRISIS" && oldRegime.Status != "CRISIS" {
+			logTrade("[EMERGENCY CRISIS SHIELD] Sentinel declared CRISIS during live session. Squaring off all open positions immediately!")
+			now := time.Now()
+			squareOffAllPositions(now)
+		}
+	}
+}
+
 func loadMarketRegime() {
 	regimePath := filepath.Join("data", "regime.json")
+	if info, err := os.Stat(regimePath); err == nil {
+		lastRegimeMtime = info.ModTime()
+	}
+
 	data, err := os.ReadFile(regimePath)
 	if err != nil {
 		log.Printf("[REGIME] No regime.json found; defaulting to NORMAL")
@@ -444,14 +565,22 @@ func loadSavedTokenMap() bool {
 		return false
 	}
 
+	if symbolToToken == nil {
+		symbolToToken = make(map[string]string)
+	}
+	for k, v := range saved.Map {
+		symbolToToken[k] = v
+	}
+
+	allFound := true
 	for _, sym := range stocks.Tickers {
-		if _, ok := saved.Map[sym]; !ok {
-			return false
+		if _, ok := symbolToToken[sym]; !ok {
+			allFound = false
+			break
 		}
 	}
 
-	symbolToToken = saved.Map
-	return true
+	return allFound
 }
 
 func saveTokenMap() {
@@ -534,10 +663,14 @@ func main() {
 	// 3. Resolve Symbol to Token mapping
 	symbolToToken = make(map[string]string)
 	if loadSavedTokenMap() {
-		fmt.Println("Loaded existing token map from file")
+		fmt.Printf("Loaded existing token map from file (%d/%d tickers ready)\n", len(symbolToToken), len(stocks.Tickers))
 	} else {
-		fmt.Println("Token map missing - resolving symbols via Flattrade API...")
+		fmt.Printf("Resolving missing symbols via Flattrade API (%d already cached)...\n", len(symbolToToken))
+		newResolved := 0
 		for _, sym := range stocks.Tickers {
+			if _, exists := symbolToToken[sym]; exists {
+				continue
+			}
 			respBytes, err := client.SearchScrip("NSE", sym+"-EQ")
 			if err != nil {
 				log.Printf("Search failed for %s: %v", sym, err)
@@ -555,13 +688,16 @@ func main() {
 					if strings.Contains(v.Tsym, "-EQ") {
 						symbolToToken[sym] = v.Token
 						fmt.Printf("Mapped %s → %s\n", sym, v.Token)
+						newResolved++
 						break
 					}
 				}
 			}
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(150 * time.Millisecond)
 		}
-		saveTokenMap()
+		if newResolved > 0 {
+			saveTokenMap()
+		}
 	}
 
 	fmt.Printf("Mapped %d/%d symbols successfully\n", len(symbolToToken), len(stocks.Tickers))
@@ -605,12 +741,10 @@ func main() {
 		// NSE Normal Trading Hours: 09:15 to 15:30 IST
 		// ------------------------------------------------------------------
 		isMarketOpen := (hour == 9 && min >= 15) || (hour > 9 && hour < 15) || (hour == 15 && min <= 30)
-		canEnter := (hour == 9 && min >= 30) || (hour > 9 && hour < 15)
+		canEnter := ((hour == 9 && min >= 35) || (hour > 9 && hour < 14)) // Pillar 4: 09:35 to 14:00 IST entry cutoff
 
-		// Pre-market sentinel refresh at 09:14 IST
-		if hour == 9 && min == 14 && now.Second() < 25 {
-			loadMarketRegime()
-		}
+		// Dynamic regime hot-reload: detects any asynchronous Sentinel updates during the day
+		checkAndReloadMarketRegime()
 
 		// Post-market daily summary at 15:30 IST (or anytime post-market if not yet compounded today)
 		todayStr := now.Format("2006-01-02")
@@ -636,18 +770,28 @@ func main() {
 			fmt.Printf("[%s] CIRCUIT BREAKER: Daily loss floor (₹%.2f) reached. New entries halted.\n", now.Format("15:04:05"), lossLimit)
 		}
 
-		fmt.Printf("\nPolling LTP at %s\n", now.Format("15:04:05"))
+		fmt.Printf("\nPolling Quotes & Smart Signals at %s\n", now.Format("15:04:05"))
 		successCount := 0
 
 		for sym, token := range symbolToToken {
-			ltp, err := client.GetLTP("NSE", token)
+			quote, err := client.GetQuoteDetails("NSE", token)
 			if err != nil {
-				log.Printf("%s LTP error: %v", sym, err)
-				if strings.Contains(err.Error(), "exceeds Limit") {
-					time.Sleep(2 * time.Second)
+				// Fallback to LTP if GetQuoteDetails has issues
+				ltp, lerr := client.GetLTP("NSE", token)
+				if lerr != nil {
+					log.Printf("%s Quote error: %v", sym, err)
+					if strings.Contains(err.Error(), "exceeds Limit") {
+						time.Sleep(2 * time.Second)
+					}
+					continue
 				}
-				continue
+				quote = models.QuoteData{LTP: ltp, VWAP: ltp, Open: ltp, High: ltp, Low: ltp}
 			}
+
+			ltp := quote.LTP
+			vwap := quote.VWAP
+			store.SetVWAP(sym, vwap)
+			store.UpdateLTP(sym, ltp)
 
 			successCount++
 
@@ -657,15 +801,53 @@ func main() {
 			// 2. Append tick history for mean-reversion filters
 			store.AppendHistory(sym, ltp, historyWindow)
 
-			// 3. Evaluate new entries if market is open for entries
-			if canEnter {
+			// 3. During Base establishment window (09:15 to 09:35 IST): record and anchor Base Range
+			if !store.IsBaseEstablished() {
+				br, exists := store.GetBaseRange(sym)
+				openP := quote.Open
+				if openP <= 0 {
+					openP = ltp
+				}
+				highP := quote.High
+				if highP <= 0 || ltp > highP {
+					highP = ltp
+				}
+				lowP := quote.Low
+				if lowP <= 0 || ltp < lowP {
+					lowP = ltp
+				}
+				if exists {
+					if br.High > highP {
+						highP = br.High
+					}
+					if br.Low > 0 && br.Low < lowP {
+						lowP = br.Low
+					}
+					if br.OpenPrice > 0 {
+						openP = br.OpenPrice
+					}
+				}
+				retPct := 0.0
+				if openP > 0 {
+					retPct = ((ltp - openP) / openP) * 100.0
+				}
+				store.SetBaseRange(sym, openP, highP, lowP, retPct)
+			}
+
+			// 4. Evaluate new entries if market is open for entries (09:35 to 14:00 IST) and base is established
+			if canEnter && store.IsBaseEstablished() {
 				checkAllEntries(sym, token, ltp)
 			}
 
-			// 4. Update established High/Low during market hours only
+			// 5. Update established High/Low during market hours only
 			store.UpdateHighLow(sym, ltp)
 
 			time.Sleep(200 * time.Millisecond)
+		}
+
+		// If past 09:35 and base not yet established, finalize it now
+		if (hour > 9 || (hour == 9 && min >= 35)) && !store.IsBaseEstablished() {
+			finalizeBaseAndRSRanks()
 		}
 
 		fmt.Printf("Successfully fetched LTP for %d stocks\n", successCount)

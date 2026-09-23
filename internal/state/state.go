@@ -9,27 +9,40 @@ import (
 
 // Store provides encapsulated, thread-safe access to all in-memory bot state.
 type Store struct {
-	mu             sync.RWMutex
-	highLow        map[string]models.HighLow
-	ltpHistory     map[string][]float64
-	longPositions  map[string]models.Position
-	shortPositions map[string]models.Position
-	tradeHistory   []models.TradeRecord
-	dailyPnL       float64
-	lastDailyReset time.Time
-	regime         models.MarketRegime
-	account        models.AccountState
+	mu              sync.RWMutex
+	highLow         map[string]models.HighLow
+	baseRanges      map[string]models.BaseRange
+	baseEstablished bool
+	rsLeaders       map[string]bool
+	rsLaggards      map[string]bool
+	tradedToday     map[string]bool
+	vwapMap         map[string]float64
+	ltpHistory      map[string][]float64
+	latestLTP       map[string]float64
+	longPositions   map[string]models.Position
+	shortPositions  map[string]models.Position
+	tradeHistory    []models.TradeRecord
+	dailyPnL        float64
+	lastDailyReset  time.Time
+	regime          models.MarketRegime
+	account         models.AccountState
 }
 
 // NewStore initializes a new state Store.
 func NewStore() *Store {
 	return &Store{
-		highLow:        make(map[string]models.HighLow),
-		ltpHistory:     make(map[string][]float64),
-		longPositions:  make(map[string]models.Position),
-		shortPositions: make(map[string]models.Position),
-		tradeHistory:   make([]models.TradeRecord, 0),
-		lastDailyReset: time.Now().AddDate(0, 0, -1),
+		highLow:         make(map[string]models.HighLow),
+		baseRanges:      make(map[string]models.BaseRange),
+		rsLeaders:       make(map[string]bool),
+		rsLaggards:      make(map[string]bool),
+		tradedToday:     make(map[string]bool),
+		vwapMap:         make(map[string]float64),
+		ltpHistory:      make(map[string][]float64),
+		latestLTP:       make(map[string]float64),
+		longPositions:   make(map[string]models.Position),
+		shortPositions:  make(map[string]models.Position),
+		tradeHistory:    make([]models.TradeRecord, 0),
+		lastDailyReset:  time.Now().AddDate(0, 0, -1),
 		regime: models.MarketRegime{
 			Status:         "NORMAL",
 			Color:          "GREEN",
@@ -55,6 +68,8 @@ func (s *Store) UpdateHighLow(sym string, ltp float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.latestLTP[sym] = ltp
+
 	hl, exists := s.highLow[sym]
 	if !exists {
 		hl = models.HighLow{High: ltp, Low: ltp}
@@ -69,11 +84,148 @@ func (s *Store) UpdateHighLow(sym string, ltp float64) {
 	s.highLow[sym] = hl
 }
 
+func (s *Store) UpdateLTP(sym string, ltp float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.latestLTP[sym] = ltp
+}
+
+func (s *Store) GetLTP(sym string) float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.latestLTP[sym]
+}
+
 func (s *Store) GetHighLow(sym string) (models.HighLow, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	hl, ok := s.highLow[sym]
 	return hl, ok
+}
+
+// ----------------------------------------------------------------------
+// Base Range & Relative Strength (RS)
+// ----------------------------------------------------------------------
+
+func (s *Store) SetBaseRange(sym string, open, high, low, retPct float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.baseRanges[sym] = models.BaseRange{
+		OpenPrice: open,
+		High:      high,
+		Low:       low,
+		ReturnPct: retPct,
+	}
+}
+
+func (s *Store) GetBaseRange(sym string) (models.BaseRange, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	br, ok := s.baseRanges[sym]
+	return br, ok
+}
+
+func (s *Store) GetAllBaseRanges() map[string]models.BaseRange {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make(map[string]models.BaseRange, len(s.baseRanges))
+	for k, v := range s.baseRanges {
+		res[k] = v
+	}
+	return res
+}
+
+func (s *Store) SetBaseEstablished(established bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.baseEstablished = established
+}
+
+func (s *Store) IsBaseEstablished() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.baseEstablished
+}
+
+func (s *Store) SetRSRanks(leaders map[string]bool, laggards map[string]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rsLeaders = leaders
+	s.rsLaggards = laggards
+}
+
+func (s *Store) IsRSLeader(sym string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rsLeaders[sym]
+}
+
+func (s *Store) IsRSLaggard(sym string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rsLaggards[sym]
+}
+
+func (s *Store) MarkSymbolTradedToday(sym string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tradedToday[sym] = true
+}
+
+func (s *Store) HasSymbolTradedToday(sym string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.tradedToday[sym]
+}
+
+func (s *Store) SetVWAP(sym string, vwap float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.vwapMap[sym] = vwap
+}
+
+func (s *Store) GetVWAP(sym string) float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.vwapMap[sym]
+}
+
+// GetMarketBreadth calculates real-time advance/decline metrics across the active universe.
+// Returns advancePct (0.0 to 100.0), avgReturn (percentage), and totalCount.
+func (s *Store) GetMarketBreadth() (advancePct, avgReturn float64, totalCount int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.baseRanges) == 0 {
+		return 50.0, 0.0, 0
+	}
+
+	advancing := 0
+	var sumReturn float64
+
+	for sym, br := range s.baseRanges {
+		if br.OpenPrice <= 0 {
+			continue
+		}
+		ltp, ok := s.latestLTP[sym]
+		if !ok || ltp <= 0 {
+			ltp = br.OpenPrice
+		}
+		ret := ((ltp - br.OpenPrice) / br.OpenPrice) * 100.0
+		sumReturn += ret
+		if ret >= 0 {
+			advancing++
+		}
+		totalCount++
+	}
+
+	if totalCount == 0 {
+		return 50.0, 0.0, 0
+	}
+
+	advancePct = (float64(advancing) / float64(totalCount)) * 100.0
+	avgReturn = sumReturn / float64(totalCount)
+	return advancePct, avgReturn, totalCount
 }
 
 // ----------------------------------------------------------------------
@@ -262,7 +414,14 @@ func (s *Store) ResetDaily(resetTime time.Time) {
 	s.tradeHistory = nil
 	s.dailyPnL = 0
 	s.highLow = make(map[string]models.HighLow)
+	s.baseRanges = make(map[string]models.BaseRange)
+	s.baseEstablished = false
+	s.rsLeaders = make(map[string]bool)
+	s.rsLaggards = make(map[string]bool)
+	s.tradedToday = make(map[string]bool)
+	s.vwapMap = make(map[string]float64)
 	s.ltpHistory = make(map[string][]float64)
+	s.latestLTP = make(map[string]float64)
 }
 
 func (s *Store) GetLastReset() time.Time {
@@ -337,7 +496,7 @@ func (s *Store) GetPositionBudget(leverage float64) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if s.regime.Status == "CRISIS" || s.regime.MaxPositions == 0 {
+	if s.regime.Status == "CRISIS" || s.regime.Status == "CALM_STAND_DOWN" || s.regime.MaxPositions == 0 {
 		return 0.0
 	}
 
@@ -347,7 +506,7 @@ func (s *Store) GetPositionBudget(leverage float64) float64 {
 	}
 
 	if s.regime.Status == "CAUTION" {
-		// 1 position conservative sizing
+		// Caution regime: up to 2 positions allowed, 1.0x balance per position
 		return bal * 1.0 * leverage
 	}
 

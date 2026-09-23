@@ -43,6 +43,24 @@ type HighLow struct {
 	Low  float64 `json:"low"`
 }
 
+// BaseRange tracks morning established price range (09:15 - 09:35 IST)
+type BaseRange struct {
+	OpenPrice float64 `json:"open_price"`
+	High      float64 `json:"high"`
+	Low       float64 `json:"low"`
+	ReturnPct float64 `json:"return_pct"`
+}
+
+// QuoteData holds parsed market quote metrics including VWAP
+type QuoteData struct {
+	LTP    float64 `json:"ltp"`
+	VWAP   float64 `json:"vwap"`
+	Open   float64 `json:"open"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Volume int64   `json:"volume"`
+}
+
 // MarketRegime represents macro sentiment, volatility classification, and directional directives
 type MarketRegime struct {
 	Date              string            `json:"date"`

@@ -1,34 +1,252 @@
 {
-  "HAL": { "sector": "DEFENSE", "war_conflict": "BULLISH", "crude_shock": "NEUTRAL", "rate_hike": "NEUTRAL" },
-  "BEL": { "sector": "DEFENSE", "war_conflict": "BULLISH", "crude_shock": "NEUTRAL", "rate_hike": "NEUTRAL" },
-  "MAZDOCK": { "sector": "DEFENSE", "war_conflict": "BULLISH", "crude_shock": "NEUTRAL", "rate_hike": "NEUTRAL" },
-  "COCHINSHIP": { "sector": "DEFENSE", "war_conflict": "BULLISH", "crude_shock": "NEUTRAL", "rate_hike": "NEUTRAL" },
-  "TVSMOTOR": { "sector": "AUTO", "war_conflict": "BEARISH", "crude_shock": "BEARISH", "rate_hike": "BEARISH" },
-  "ASHOKLEY": { "sector": "AUTO", "war_conflict": "BEARISH", "crude_shock": "BEARISH", "rate_hike": "BEARISH" },
-  "TATAPOWER": { "sector": "POWER", "war_conflict": "NEUTRAL", "energy_crisis": "BULLISH", "rate_hike": "NEUTRAL" },
-  "TORNTPOWER": { "sector": "POWER", "war_conflict": "NEUTRAL", "energy_crisis": "BULLISH", "rate_hike": "NEUTRAL" },
-  "BHEL": { "sector": "POWER_CAPGOODS", "war_conflict": "BULLISH", "energy_crisis": "BULLISH", "rate_hike": "NEUTRAL" },
-  "DLF": { "sector": "REALTY", "war_conflict": "BEARISH", "crude_shock": "NEUTRAL", "rate_hike": "BEARISH" },
-  "GODREJPROP": { "sector": "REALTY", "war_conflict": "BEARISH", "crude_shock": "NEUTRAL", "rate_hike": "BEARISH" },
-  "TATASTEEL": { "sector": "METALS", "war_conflict": "NEUTRAL", "crude_shock": "NEUTRAL", "china_revival": "BULLISH" },
-  "JINDALSTEL": { "sector": "METALS", "war_conflict": "NEUTRAL", "crude_shock": "NEUTRAL", "china_revival": "BULLISH" },
-  "HINDALCO": { "sector": "METALS", "war_conflict": "NEUTRAL", "crude_shock": "NEUTRAL", "commodity_rally": "BULLISH" },
-  "POLYCAB": { "sector": "CABLES_INFRA", "war_conflict": "NEUTRAL", "capex_boom": "BULLISH", "rate_hike": "NEUTRAL" },
-  "KEI": { "sector": "CABLES_INFRA", "war_conflict": "NEUTRAL", "capex_boom": "BULLISH", "rate_hike": "NEUTRAL" },
-  "WABAG": { "sector": "WATER_INFRA", "war_conflict": "NEUTRAL", "capex_boom": "BULLISH", "rate_hike": "NEUTRAL" },
-  "DIXON": { "sector": "EMS_TECH", "war_conflict": "NEUTRAL", "tariffs": "BEARISH", "rate_hike": "NEUTRAL" },
-  "KAYNES": { "sector": "EMS_DEFENSE", "war_conflict": "BULLISH", "tariffs": "BEARISH", "rate_hike": "NEUTRAL" },
-  "FEDERALBNK": { "sector": "BANKING", "war_conflict": "BEARISH", "fii_selling": "BEARISH", "rate_hike": "BULLISH" },
-  "BANKINDIA": { "sector": "BANKING", "war_conflict": "BEARISH", "fii_selling": "BEARISH", "rate_hike": "NEUTRAL" },
-  "CHOLAFIN": { "sector": "NBFC_VEHICLE", "war_conflict": "BEARISH", "crude_shock": "BEARISH", "rate_hike": "BEARISH" },
-  "SHRIRAMFIN": { "sector": "NBFC_CV", "war_conflict": "BEARISH", "crude_shock": "BEARISH", "rate_hike": "BEARISH" },
-  "MUTHOOTFIN": { "sector": "NBFC_GOLD", "war_conflict": "BULLISH", "gold_rally": "BULLISH", "rate_hike": "NEUTRAL" },
-  "RVNL": { "sector": "RAIL_INFRA", "war_conflict": "NEUTRAL", "capex_boom": "BULLISH", "rate_hike": "BEARISH" },
-  "IRFC": { "sector": "RAIL_FINANCE", "war_conflict": "NEUTRAL", "capex_boom": "BULLISH", "rate_hike": "BEARISH" },
-  "TITAGARH": { "sector": "RAIL_DEFENSE", "war_conflict": "BULLISH", "capex_boom": "BULLISH", "rate_hike": "BEARISH" },
-  "IREDA": { "sector": "RENEWABLE_FIN", "war_conflict": "NEUTRAL", "energy_crisis": "BULLISH", "rate_hike": "BEARISH" },
-  "SUZLON": { "sector": "WIND_ENERGY", "war_conflict": "NEUTRAL", "energy_crisis": "BULLISH", "rate_hike": "BEARISH" },
-  "ADANIPORTS": { "sector": "PORTS_SHIPPING", "war_conflict": "BEARISH", "shipping_crisis": "BEARISH", "rate_hike": "NEUTRAL" },
-  "VOLTAS": { "sector": "CONSUMER_AC", "war_conflict": "NEUTRAL", "crude_shock": "BEARISH", "rate_hike": "NEUTRAL" },
-  "TRENT": { "sector": "RETAIL", "war_conflict": "NEUTRAL", "inflation": "BEARISH", "rate_hike": "NEUTRAL" }
+  "WHIRLPOOL": {
+    "sector": "Consumer Durables",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "CARBORUNIV": {
+    "sector": "Capital Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "ENGINERSIN": {
+    "sector": "Construction",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "TATACHEM": {
+    "sector": "Chemicals",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "OLAELEC": {
+    "sector": "Automobile and Auto Components",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "ELECON": {
+    "sector": "Capital Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "PATANJALI": {
+    "sector": "Fast Moving Consumer Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "MEESHO": {
+    "sector": "Consumer Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "WELCORP": {
+    "sector": "Capital Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "WOCKPHARMA": {
+    "sector": "Healthcare",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "CPPLUS": {
+    "sector": "Capital Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "JYOTICNC": {
+    "sector": "Capital Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "GABRIEL": {
+    "sector": "Automobile and Auto Components",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "IKS": {
+    "sector": "Information Technology",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "ACMESOLAR": {
+    "sector": "Power",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "TEGA": {
+    "sector": "Capital Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "JSWINFRA": {
+    "sector": "Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "BANDHANBNK": {
+    "sector": "Financial Services",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "POONAWALLA": {
+    "sector": "Financial Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "JAINREC": {
+    "sector": "Metals & Mining",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "BIKAJI": {
+    "sector": "Fast Moving Consumer Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "SPLPETRO": {
+    "sector": "Chemicals",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "SYRMA": {
+    "sector": "Capital Goods",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "OLECTRA": {
+    "sector": "Automobile and Auto Components",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "POLICYBZR": {
+    "sector": "Financial Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "NTPCGREEN": {
+    "sector": "Power",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "BELRISE": {
+    "sector": "Automobile and Auto Components",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "ATGL": {
+    "sector": "Oil Gas & Consumable Fuels",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "NUVOCO": {
+    "sector": "Construction Materials",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "FIRSTCRY": {
+    "sector": "Consumer Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "PWL": {
+    "sector": "Consumer Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "CONCORDBIO": {
+    "sector": "Healthcare",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "CAPLIPOINT": {
+    "sector": "Healthcare",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "SONACOMS": {
+    "sector": "Automobile and Auto Components",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "OFSS": {
+    "sector": "Information Technology",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "TATAINVEST": {
+    "sector": "Financial Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "WELSPUNLIV": {
+    "sector": "Textiles",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "URBANCO": {
+    "sector": "Consumer Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "COHANCE": {
+    "sector": "Healthcare",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "AIIL": {
+    "sector": "Financial Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "SAIL": {
+    "sector": "Metals & Mining",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "3MINDIA": {
+    "sector": "Diversified",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "SUNTV": {
+    "sector": "Media Entertainment & Publication",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "ANANTRAJ": {
+    "sector": "Realty",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "MANKIND": {
+    "sector": "Healthcare",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "IIFL": {
+    "sector": "Financial Services",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "NSLNISP": {
+    "sector": "Metals & Mining",
+    "beta_class": "B",
+    "weight": 1.0
+  },
+  "VIJAYA": {
+    "sector": "Healthcare",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "ABSLAMC": {
+    "sector": "Financial Services",
+    "beta_class": "A",
+    "weight": 1.0
+  },
+  "AEGISLOG": {
+    "sector": "Oil Gas & Consumable Fuels",
+    "beta_class": "A",
+    "weight": 1.0
+  }
 }

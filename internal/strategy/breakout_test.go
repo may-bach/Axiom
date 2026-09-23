@@ -119,3 +119,156 @@ func TestResolveAllowedDirections(t *testing.T) {
 		t.Fatalf("expected neither allowed for BLOCKED, got long=%v, short=%v", long, short)
 	}
 }
+
+func TestSmartAlgoExits(t *testing.T) {
+	eng := NewEngine()
+	strat := models.StockStrategy{
+		Target: 0.02, // 2%
+		SL:     0.01, // 1%
+	}
+
+	// 1. Long Breakeven Guard: Entry 1000, Peak reached 1006 (+0.6%), current price drops to 1000.4 (+0.04%)
+	posLong := models.Position{
+		Symbol:       "JINDALSTEL",
+		Direction:    "LONG",
+		EntryPrice:   1000.0,
+		HighestPrice: 1006.0,
+		Qty:          10,
+		EntryTime:    time.Now().Add(-10 * time.Minute),
+	}
+	shouldExit, reason := eng.EvaluateLongExit(posLong, strat, 1000.4, 30)
+	if !shouldExit || reason != "Breakeven Guard" {
+		t.Fatalf("expected Breakeven Guard exit for long, got %v (%s)", shouldExit, reason)
+	}
+
+	// 2. Long Trailing SL: Entry 1000, Peak reached 1012 (+1.2%), price drops to 1007.5 (pullback 0.44% > 0.4%)
+	posLong.HighestPrice = 1012.0
+	shouldExit, reason = eng.EvaluateLongExit(posLong, strat, 1007.5, 30)
+	if !shouldExit || reason != "Trailing SL" {
+		t.Fatalf("expected Trailing SL exit for long, got %v (%s)", shouldExit, reason)
+	}
+
+	// 3. Short Breakeven Guard: Entry 1000, Lowest reached 994 (+0.6% profit), current price rises to 999.8 (+0.02%)
+	posShort := models.Position{
+		Symbol:       "TRENT",
+		Direction:    "SHORT",
+		EntryPrice:   1000.0,
+		LowestPrice:  994.0,
+		Qty:          10,
+		EntryTime:    time.Now().Add(-10 * time.Minute),
+	}
+	shouldExit, reason = eng.EvaluateShortExit(posShort, strat, 999.8, 30)
+	if !shouldExit || reason != "Breakeven Guard" {
+		t.Fatalf("expected Breakeven Guard exit for short, got %v (%s)", shouldExit, reason)
+	}
+
+	// 4. Short Trailing SL: Entry 1000, Lowest reached 988 (+1.2% profit), price bounces to 993 (rebound 0.5% > 0.4%)
+	posShort.LowestPrice = 988.0
+	shouldExit, reason = eng.EvaluateShortExit(posShort, strat, 993.0, 30)
+	if !shouldExit || reason != "Trailing SL" {
+		t.Fatalf("expected Trailing SL exit for short, got %v (%s)", shouldExit, reason)
+	}
+}
+
+func TestBaseBreakouts(t *testing.T) {
+	eng := NewEngine()
+
+	// Long Base Breakout: baseHigh 1160.0, buffer 0.003 -> threshold level 1163.48
+	// Case A: RS Leader, above base, above VWAP (1162.0) -> Valid entry
+	valid, _ := eng.CheckBaseBreakoutLong("JINDALSTEL", 1165.0, 1160.0, 1162.0, true, 0.003)
+	if !valid {
+		t.Fatalf("expected valid long breakout at 1165.0")
+	}
+
+	// Case B: Not an RS Leader -> Reject
+	valid, _ = eng.CheckBaseBreakoutLong("JINDALSTEL", 1165.0, 1160.0, 1162.0, false, 0.003)
+	if valid {
+		t.Fatalf("expected rejection when not RS leader")
+	}
+
+	// Case C: Below VWAP (LTP 1165.0, VWAP 1166.0) -> Reject
+	valid, _ = eng.CheckBaseBreakoutLong("JINDALSTEL", 1165.0, 1160.0, 1166.0, true, 0.003)
+	if valid {
+		t.Fatalf("expected rejection when LTP < VWAP")
+	}
+
+	// Short Base Breakdown: baseLow 1000.0, buffer 0.003 -> threshold level 997.0
+	// Case A: RS Laggard, below base, below VWAP (998.0) -> Valid entry
+	valid, _ = eng.CheckBaseBreakdownShort("VOLTAS", 995.0, 1000.0, 998.0, true, 0.003)
+	if !valid {
+		t.Fatalf("expected valid short breakdown at 995.0")
+	}
+
+	// Case B: Not an RS Laggard -> Reject
+	valid, _ = eng.CheckBaseBreakdownShort("VOLTAS", 995.0, 1000.0, 998.0, false, 0.003)
+	if valid {
+		t.Fatalf("expected rejection when not RS laggard")
+	}
+
+	// Case C: Above VWAP (LTP 995.0, VWAP 994.0) -> Reject
+	valid, _ = eng.CheckBaseBreakdownShort("VOLTAS", 995.0, 1000.0, 994.0, true, 0.003)
+	if valid {
+		t.Fatalf("expected rejection when LTP > VWAP")
+	}
+}
+
+func TestCheckTrendAlignment(t *testing.T) {
+	eng := NewEngine()
+
+	// 1. Insufficient universe breadth data (<5) -> allowed by default
+	ok, _ := eng.CheckTrendAlignment("LONG", 10.0, -2.0, 3)
+	if !ok {
+		t.Fatalf("expected fallback permission when count < 5")
+	}
+
+	// 2. LONG in Bullish Market: 65% advancing, +0.45% avg return -> OK
+	ok, _ = eng.CheckTrendAlignment("LONG", 65.0, 0.45, 50)
+	if !ok {
+		t.Fatalf("expected LONG allowed in bullish market")
+	}
+
+	// 3. LONG in Crash/Selloff: 20% advancing, -1.2% avg return -> Blocked
+	ok, reason := eng.CheckTrendAlignment("LONG", 20.0, -1.2, 50)
+	if ok {
+		t.Fatalf("expected LONG blocked during market crash")
+	}
+	if reason == "" {
+		t.Fatalf("expected non-empty rejection reason")
+	}
+
+	// 4. LONG with low advance % (40% < 45%) -> Blocked
+	ok, _ = eng.CheckTrendAlignment("LONG", 40.0, 0.05, 50)
+	if ok {
+		t.Fatalf("expected LONG blocked when advance %% < 45%%")
+	}
+
+	// 5. LONG with negative avg return (-0.25% < -0.15%) -> Blocked
+	ok, _ = eng.CheckTrendAlignment("LONG", 50.0, -0.25, 50)
+	if ok {
+		t.Fatalf("expected LONG blocked when avg return < -0.15%%")
+	}
+
+	// 6. SHORT in Bearish Market: 30% advancing, -0.60% avg return -> OK
+	ok, _ = eng.CheckTrendAlignment("SHORT", 30.0, -0.60, 50)
+	if !ok {
+		t.Fatalf("expected SHORT allowed in bearish market")
+	}
+
+	// 7. SHORT in Bullish Rally: 75% advancing, +0.80% avg return -> Blocked
+	ok, _ = eng.CheckTrendAlignment("SHORT", 75.0, 0.80, 50)
+	if ok {
+		t.Fatalf("expected SHORT blocked during market rally")
+	}
+
+	// 8. SHORT with high advance % (60% > 55%) -> Blocked
+	ok, _ = eng.CheckTrendAlignment("SHORT", 60.0, -0.05, 50)
+	if ok {
+		t.Fatalf("expected SHORT blocked when advance %% > 55%%")
+	}
+
+	// 9. SHORT with positive avg return (+0.25% > +0.15%) -> Blocked
+	ok, _ = eng.CheckTrendAlignment("SHORT", 50.0, 0.25, 50)
+	if ok {
+		t.Fatalf("expected SHORT blocked when avg return > +0.15%%")
+	}
+}

@@ -13,3 +13,15 @@ if pgrep -x "axiom" > /dev/null; then
 else
     echo "Axiom is not running."
 fi
+
+if pgrep -f "sentinel.py --daemon" > /dev/null; then
+    SPID=$(pgrep -f "sentinel.py --daemon")
+    echo "Stopping Sentinel Daemon (PID: $SPID)..."
+    kill -15 $SPID
+    sleep 1
+    if pgrep -f "sentinel.py --daemon" > /dev/null; then
+        kill -9 $SPID
+    fi
+    echo "Sentinel Daemon stopped."
+fi
+

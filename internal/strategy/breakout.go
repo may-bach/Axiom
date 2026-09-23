@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -112,33 +113,85 @@ func (e *Engine) CheckQuickDropShort(sym string, ltp float64, hist []float64) (b
 	return false, ""
 }
 
+// CheckBaseBreakoutLong evaluates 09:35 Base Breakout + VWAP confirmation + RS Leader status
+func (e *Engine) CheckBaseBreakoutLong(sym string, ltp, baseHigh, vwap float64, isRSLeader bool, threshold float64) (bool, string) {
+	if !isRSLeader {
+		return false, ""
+	}
+	if baseHigh > 0 && ltp >= baseHigh*(1+threshold) && ltp > vwap {
+		return true, fmt.Sprintf("BASE BREAKOUT LONG BUY %s @ %.2f (base high %.2f, vwap %.2f, thresh %.3f)", sym, ltp, baseHigh, vwap, threshold)
+	}
+	return false, ""
+}
+
+// CheckBaseBreakdownShort evaluates 09:35 Base Breakdown + VWAP confirmation + RS Laggard status
+func (e *Engine) CheckBaseBreakdownShort(sym string, ltp, baseLow, vwap float64, isRSLaggard bool, threshold float64) (bool, string) {
+	if !isRSLaggard {
+		return false, ""
+	}
+	if baseLow > 0 && ltp <= baseLow*(1-threshold) && ltp < vwap {
+		return true, fmt.Sprintf("BASE BREAKDOWN SHORT SELL %s @ %.2f (base low %.2f, vwap %.2f, thresh %.3f)", sym, ltp, baseLow, vwap, threshold)
+	}
+	return false, ""
+}
+
+// CheckTrendAlignment validates market breadth across the active universe before entries.
+// For LONG: requires advancePct >= 45.0% and avgReturn >= -0.15%.
+// For SHORT: requires advancePct <= 55.0% and avgReturn <= +0.15%.
+// If totalCount < 5, it gracefully permits the trade due to insufficient universe breadth data.
+func (e *Engine) CheckTrendAlignment(dir string, advancePct, avgReturn float64, totalCount int) (bool, string) {
+	if totalCount < 5 {
+		return true, "insufficient breadth data; permitted by default"
+	}
+
+	if dir == "LONG" {
+		if advancePct < 45.0 || avgReturn < -0.15 {
+			return false, fmt.Sprintf("Blocked by Bearish Market Trend (Advance: %.1f%% < 45.0%%, Avg: %+.2f%% < -0.15%%)", advancePct, avgReturn)
+		}
+		return true, fmt.Sprintf("Market Trend Bullish (Advance: %.1f%%, Avg: %+.2f%%)", advancePct, avgReturn)
+	}
+
+	if dir == "SHORT" {
+		if advancePct > 55.0 || avgReturn > 0.15 {
+			return false, fmt.Sprintf("Blocked by Bullish Market Trend (Advance: %.1f%% > 55.0%%, Avg: %+.2f%% > +0.15%%)", advancePct, avgReturn)
+		}
+		return true, fmt.Sprintf("Market Trend Bearish (Advance: %.1f%%, Avg: %+.2f%%)", advancePct, avgReturn)
+	}
+
+	return false, "invalid direction"
+}
+
 // ----------------------------------------------------------------------
 // Exit Signal Evaluations
 // ----------------------------------------------------------------------
 
 func (e *Engine) EvaluateLongExit(pos models.Position, strat models.StockStrategy, ltp float64, stagnationMin int) (bool, string) {
-	// 1. Fixed Stop-Loss
-	fixedSL := pos.EntryPrice * (1 - strat.SL)
-	if ltp <= fixedSL {
-		return true, fmt.Sprintf("Fixed SL %.1f%%", strat.SL*100)
-	}
+	pnlPct := (ltp - pos.EntryPrice) / pos.EntryPrice
+	maxFav := (pos.HighestPrice - pos.EntryPrice) / pos.EntryPrice
 
-	// 2. Profit Target
-	target := pos.EntryPrice * (1 + strat.Target)
-	if ltp >= target {
+	// 1. Profit Target
+	if pnlPct >= strat.Target {
 		return true, fmt.Sprintf("Target %.1f%%", strat.Target*100)
 	}
 
-	// 3. Trailing Stop-Loss
-	trailingSL := pos.HighestPrice * (1 - e.defaultTrailingPercent/100)
-	if ltp <= trailingSL {
+	// 2. Fixed Stop-Loss (strictly capped at strat.SL)
+	if pnlPct <= -strat.SL {
+		return true, fmt.Sprintf("Fixed SL %.1f%%", strat.SL*100)
+	}
+
+	// 3. Breakeven Guard: if peak reached +0.5%, ratchet stop to breakeven (+0.05%)
+	if maxFav >= 0.005 && pnlPct <= 0.0005 {
+		return true, "Breakeven Guard"
+	}
+
+	// 4. Trailing Stop: if peak reached +0.8%, trail by 0.4% from peak
+	if maxFav >= 0.008 && ((pos.HighestPrice-ltp)/pos.HighestPrice) >= 0.004 {
 		return true, "Trailing SL"
 	}
 
-	// 4. Stagnation Timeout (flat chop after X minutes)
+	// 5. Stagnation Timeout: flat chop after X minutes
 	if stagnationMin > 0 && time.Since(pos.EntryTime) >= time.Duration(stagnationMin)*time.Minute {
-		pctChange := (ltp - pos.EntryPrice) / pos.EntryPrice
-		if pctChange >= -0.004 && pctChange <= 0.004 {
+		if math.Abs(pnlPct) <= 0.002 {
 			return true, fmt.Sprintf("Stagnation Timeout (%dm flat)", stagnationMin)
 		}
 	}
@@ -147,28 +200,32 @@ func (e *Engine) EvaluateLongExit(pos models.Position, strat models.StockStrateg
 }
 
 func (e *Engine) EvaluateShortExit(pos models.Position, strat models.StockStrategy, ltp float64, stagnationMin int) (bool, string) {
-	// 1. Fixed Stop-Loss
-	fixedSL := pos.EntryPrice * (1 + strat.SL)
-	if ltp >= fixedSL {
-		return true, fmt.Sprintf("Fixed SL %.1f%%", strat.SL*100)
-	}
+	pnlPct := (pos.EntryPrice - ltp) / pos.EntryPrice
+	maxFav := (pos.EntryPrice - pos.LowestPrice) / pos.EntryPrice
 
-	// 2. Profit Target
-	target := pos.EntryPrice * (1 - strat.Target)
-	if ltp <= target {
+	// 1. Profit Target
+	if pnlPct >= strat.Target {
 		return true, fmt.Sprintf("Target %.1f%%", strat.Target*100)
 	}
 
-	// 3. Trailing Stop-Loss
-	trailingSL := pos.LowestPrice * (1 + e.defaultTrailingPercent/100)
-	if ltp >= trailingSL {
+	// 2. Fixed Stop-Loss
+	if pnlPct <= -strat.SL {
+		return true, fmt.Sprintf("Fixed SL %.1f%%", strat.SL*100)
+	}
+
+	// 3. Breakeven Guard: if peak reached +0.5%, ratchet stop to breakeven (+0.05%)
+	if maxFav >= 0.005 && pnlPct <= 0.0005 {
+		return true, "Breakeven Guard"
+	}
+
+	// 4. Trailing Stop: if trough reached +0.8%, trail by 0.4% from trough
+	if maxFav >= 0.008 && ((ltp-pos.LowestPrice)/pos.LowestPrice) >= 0.004 {
 		return true, "Trailing SL"
 	}
 
-	// 4. Stagnation Timeout (flat chop after X minutes)
+	// 5. Stagnation Timeout: flat chop after X minutes
 	if stagnationMin > 0 && time.Since(pos.EntryTime) >= time.Duration(stagnationMin)*time.Minute {
-		pctChange := (pos.EntryPrice - ltp) / pos.EntryPrice
-		if pctChange >= -0.004 && pctChange <= 0.004 {
+		if math.Abs(pnlPct) <= 0.002 {
 			return true, fmt.Sprintf("Stagnation Timeout (%dm flat)", stagnationMin)
 		}
 	}

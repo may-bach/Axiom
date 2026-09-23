@@ -6,10 +6,18 @@ echo "          AXIOM BOT STATUS                "
 echo "=========================================="
 if pgrep -x "axiom" > /dev/null; then
     PID=$(pgrep -x axiom)
-    echo "Status: RUNNING (PID: $PID)"
+    echo "Axiom Engine   : RUNNING (PID: $PID)"
     ps -p $PID -o pid,%cpu,%mem,etime,cmd
 else
-    echo "Status: STOPPED"
+    echo "Axiom Engine   : STOPPED"
+fi
+
+if pgrep -f "sentinel.py --daemon" > /dev/null; then
+    SPID=$(pgrep -f "sentinel.py --daemon")
+    echo "Sentinel Daemon: RUNNING (PID: $SPID)"
+    ps -p $SPID -o pid,%cpu,%mem,etime,cmd
+else
+    echo "Sentinel Daemon: STOPPED"
 fi
 
 if [ -f data/fresh_request_code.txt ]; then

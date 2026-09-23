@@ -23,7 +23,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-ROOT = Path("/home/opc/Axiom") if Path("/home/opc/Axiom").exists() else Path(".")
+ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 LOGS_DIR = ROOT / "logs"
 TRADES_LOG = LOGS_DIR / "trades.log"

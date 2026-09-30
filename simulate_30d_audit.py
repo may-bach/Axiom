@@ -105,9 +105,10 @@ def run_simulation(strategy_type="FULL_SYSTEM", max_trades_day=3):
             eligible_shorts = set(s for s, b in sorted_by_ret if b["ret"] < 0)
             daily_cap = 8
         else:
-            # Moving Stock Window: strictly top 5 leaders (> +0.20%) and bottom 5 laggards (< -0.20%)
-            eligible_longs = set(s for s, b in sorted_by_ret[:5] if b["ret"] > 0.20)
-            eligible_shorts = set(s for s, b in sorted_by_ret[-5:] if b["ret"] < -0.20)
+            # Moving Stock Window: Sweet-Spot (nascent momentum between 0.20% and 2.50%)
+            # Overextended moves (> +2.5% or < -2.5%) are excluded to prevent exhaustion traps
+            eligible_longs = set([s for s, b in sorted_by_ret if 0.20 < b["ret"] <= 2.50][:5])
+            eligible_shorts = set([s for s, b in sorted_by_ret if -2.50 <= b["ret"] < -0.20][-5:])
             daily_cap = max_trades_day
 
         open_positions = {}
@@ -200,6 +201,11 @@ def run_simulation(strategy_type="FULL_SYSTEM", max_trades_day=3):
                     del open_positions[s]
 
             # 2. Evaluate Entries
+            # Consecutive Loss Circuit Breaker: If 2 trades today closed in loss, halt entries
+            losses_today = sum(1 for tr in day_trades if tr["net_pnl"] < 0)
+            if losses_today >= 2:
+                continue
+
             if can_enter and len(day_trades) + len(open_positions) < daily_cap:
                 for s in day_bars.keys():
                     if s in open_positions or s in traded_today:

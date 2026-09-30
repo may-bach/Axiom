@@ -481,27 +481,31 @@ def evaluate_regime():
     extreme_vix_panic = vix is not None and vix >= 22.0
     extreme_score = score >= 75
     is_gemini_crisis = (macro_theme == "SYSTEMIC_CRISIS")
+    vix_spike = (vix_chg is not None and vix_chg >= 8.0)
+    vix_shock = (vix_chg is not None and vix_chg >= 15.0)
 
     has_active_theme = (macro_theme not in ("", "CALM_TRENDING") and any(d != "NEUTRAL" for d in stock_directives.values()))
 
-    if confirmed_crisis or extreme_vix_panic or extreme_score or is_gemini_crisis:
+    if confirmed_crisis or extreme_vix_panic or extreme_score or is_gemini_crisis or vix_shock:
         status = "CRISIS"
         color = "RED"
         max_pos = 0
         budget = 0.0
-        reason = f"Confirmed systemic crisis ({theme_summary if is_gemini_crisis else 'VIX/Headline shock'}). Market Shield Active: Trading halted today."
-    elif vix is not None and vix < 12.0 and not has_active_theme and score < 30:
+        reason = f"Confirmed systemic crisis ({theme_summary if is_gemini_crisis else ('Volatility shock: India VIX jumped +' + str(vix_chg) + '%' if vix_shock else 'VIX/Headline shock')}). Market Shield Active: Trading halted today."
+    elif vix is not None and vix < 12.0 and not has_active_theme and score < 30 and not vix_spike:
         status = "CALM_STAND_DOWN"
         color = "GRAY"
         max_pos = 0
         budget = 0.0
         reason = f"Volatility Gate: Ultra-low India VIX ({vix:.2f} < 12.0) with zero sector catalyst. Standing down in 100% Cash to prevent chop losses and statutory fee bleeding."
-    elif (has_direct_crisis and vix and vix < 16.0) or (vix and (vix >= 17.0 or vix < 12.0)) or score >= 25:
+    elif (has_direct_crisis and vix and vix < 16.0) or (vix and (vix >= 17.0 or vix < 12.0)) or score >= 25 or vix_spike:
         status = "CAUTION"
         color = "YELLOW"
         max_pos = 2
         budget = 10000.0
-        if has_active_theme:
+        if vix_spike:
+            reason = f"Volatility Velocity Alert: India VIX surged {vix_chg:+.1f}% today. Caution Mode: Max 2 positions, Rs.10k size to prevent whipsaw losses."
+        elif has_active_theme:
             reason = f"Low VIX ({vix:.2f} < 12) with active {macro_theme} theme. Caution Mode: Max 2 positions, targeting sector leaders."
         elif has_direct_crisis and vix and vix < 16.0:
             reason = f"Geopolitical headline flagged, but India VIX is calm ({vix:.2f} < 16). Caution Mode: Max 2 positions, Rs.10k size."

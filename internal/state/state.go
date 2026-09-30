@@ -407,6 +407,23 @@ func (s *Store) GetTradeHistory() []models.TradeRecord {
 	return res
 }
 
+// HasConsecutiveLosses returns true if the last `count` closed trades in today's history all had negative PnL.
+func (s *Store) HasConsecutiveLosses(count int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.tradeHistory) < count || count <= 0 {
+		return false
+	}
+
+	for i := len(s.tradeHistory) - count; i < len(s.tradeHistory); i++ {
+		if s.tradeHistory[i].PnL >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Store) ResetDaily(resetTime time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

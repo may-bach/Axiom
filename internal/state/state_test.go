@@ -297,3 +297,48 @@ func TestMarketBreadth(t *testing.T) {
 	}
 }
 
+func TestConsecutiveLossCircuitBreaker(t *testing.T) {
+	store := NewStore()
+
+	// 1. Empty history
+	if store.HasConsecutiveLosses(2) {
+		t.Fatalf("expected false on empty history")
+	}
+
+	// 2. Trade 1 is Win (+100)
+	store.RecordTrade(models.TradeRecord{Symbol: "HAL", PnL: 100.0})
+	if store.HasConsecutiveLosses(2) {
+		t.Fatalf("expected false after 1 win")
+	}
+
+	// 3. Trade 2 is Loss (-50)
+	store.RecordTrade(models.TradeRecord{Symbol: "BEL", PnL: -50.0})
+	if store.HasConsecutiveLosses(2) {
+		t.Fatalf("expected false after 1 loss (only 1 consecutive)")
+	}
+
+	// 4. Trade 3 is Loss (-70) -> Now 2 consecutive losses!
+	store.RecordTrade(models.TradeRecord{Symbol: "TVSMOTOR", PnL: -70.0})
+	if !store.HasConsecutiveLosses(2) {
+		t.Fatalf("expected true after 2 consecutive losses")
+	}
+
+	// 5. Trade 4 is Win (+150) -> Resets consecutive streak
+	store.RecordTrade(models.TradeRecord{Symbol: "MARUTI", PnL: 150.0})
+	if store.HasConsecutiveLosses(2) {
+		t.Fatalf("expected false after winning trade breaks streak")
+	}
+
+	// 6. Trade 5 is Loss (-40) -> 1 loss
+	store.RecordTrade(models.TradeRecord{Symbol: "DLF", PnL: -40.0})
+	if store.HasConsecutiveLosses(2) {
+		t.Fatalf("expected false after only 1 loss")
+	}
+
+	// 7. Trade 6 is Loss (-80) -> 2 consecutive losses again!
+	store.RecordTrade(models.TradeRecord{Symbol: "INFY", PnL: -80.0})
+	if !store.HasConsecutiveLosses(2) {
+		t.Fatalf("expected true after 2 consecutive losses")
+	}
+}
+

@@ -305,21 +305,35 @@ func finalizeBaseAndRSRanks() {
 	laggardSyms := make([]string, 0)
 
 	// Bottom Moving Window (Weakest Laggards)
-	for i := 0; i < windowSize && i < n; i++ {
+	// Sweet-Spot: -0.20% to -2.50%. Overextended drops (< -2.50%) are prone to violent mean-reversion bounces.
+	for i := 0; i < n; i++ {
 		sr := stockReturns[i]
+		if sr.returnPct < -2.50 {
+			logTrade(fmt.Sprintf("[OVEREXTENSION FILTER] %s(%+.2f%%) excluded: drops >2.5%% prone to short-covering bounces", sr.symbol, sr.returnPct))
+			continue
+		}
 		if sr.returnPct < -0.20 {
 			laggards[sr.symbol] = true
 			laggardSyms = append(laggardSyms, fmt.Sprintf("%s(%+.2f%%)", sr.symbol, sr.returnPct))
+			if len(laggards) >= windowSize {
+				break
+			}
 		}
 	}
 
 	// Top Moving Window (Strongest Leaders)
-	for i := n - windowSize; i < n; i++ {
-		if i >= 0 {
-			sr := stockReturns[i]
-			if sr.returnPct > 0.20 {
-				leaders[sr.symbol] = true
-				leaderSyms = append(leaderSyms, fmt.Sprintf("%s(%+.2f%%)", sr.symbol, sr.returnPct))
+	// Sweet-Spot: +0.20% to +2.50%. Overextended surges (> +2.50%) are prone to profit-taking pullbacks.
+	for i := n - 1; i >= 0; i-- {
+		sr := stockReturns[i]
+		if sr.returnPct > 2.50 {
+			logTrade(fmt.Sprintf("[OVEREXTENSION FILTER] %s(%+.2f%%) excluded: surges >2.5%% prone to profit-taking pullbacks", sr.symbol, sr.returnPct))
+			continue
+		}
+		if sr.returnPct > 0.20 {
+			leaders[sr.symbol] = true
+			leaderSyms = append(leaderSyms, fmt.Sprintf("%s(%+.2f%%)", sr.symbol, sr.returnPct))
+			if len(leaders) >= windowSize {
+				break
 			}
 		}
 	}
@@ -352,6 +366,11 @@ func checkAllEntries(sym, token string, ltp float64) {
 
 	// Institutional Guard: Cap at max 3 total trades per day to prevent churn and statutory fee drag
 	if len(store.GetTradeHistory()) >= 3 {
+		return
+	}
+
+	// Consecutive Losses Circuit Breaker: Halt further entries if last 2 trades today both closed in loss
+	if store.HasConsecutiveLosses(2) {
 		return
 	}
 

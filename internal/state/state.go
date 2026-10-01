@@ -2,6 +2,7 @@ package state
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/may-bach/Axiom/internal/models"
@@ -26,6 +27,7 @@ type Store struct {
 	lastDailyReset  time.Time
 	regime          models.MarketRegime
 	account         models.AccountState
+	atomicOpenCount int32
 }
 
 // NewStore initializes a new state Store.
@@ -233,13 +235,23 @@ func (s *Store) GetMarketBreadth() (advancePct, avgReturn float64, totalCount in
 // ----------------------------------------------------------------------
 
 func (s *Store) AppendHistory(sym string, ltp float64, window int) {
+	if window <= 0 {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	hist := s.ltpHistory[sym]
-	hist = append(hist, ltp)
-	if len(hist) > window {
-		hist = hist[1:]
+	if cap(hist) < window {
+		newHist := make([]float64, 0, window)
+		newHist = append(newHist, hist...)
+		hist = newHist
+	}
+	if len(hist) < window {
+		hist = append(hist, ltp)
+	} else {
+		copy(hist, hist[1:])
+		hist[window-1] = ltp
 	}
 	s.ltpHistory[sym] = hist
 }
@@ -259,12 +271,17 @@ func (s *Store) GetHistory(sym string) []float64 {
 // ----------------------------------------------------------------------
 
 func (s *Store) GetOpenCount() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.longPositions) + len(s.shortPositions)
+	return int(atomic.LoadInt32(&s.atomicOpenCount))
+}
+
+func (s *Store) HasAnyPosition() bool {
+	return atomic.LoadInt32(&s.atomicOpenCount) > 0
 }
 
 func (s *Store) HasPosition(sym string) bool {
+	if atomic.LoadInt32(&s.atomicOpenCount) == 0 {
+		return false
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	_, isLong := s.longPositions[sym]
@@ -298,6 +315,7 @@ func (s *Store) OpenLong(sym string, ltp float64, qty int, t time.Time) {
 		Qty:          qty,
 		EntryTime:    t,
 	}
+	atomic.StoreInt32(&s.atomicOpenCount, int32(len(s.longPositions)+len(s.shortPositions)))
 }
 
 func (s *Store) OpenShort(sym string, ltp float64, qty int, t time.Time) {
@@ -312,9 +330,13 @@ func (s *Store) OpenShort(sym string, ltp float64, qty int, t time.Time) {
 		Qty:          qty,
 		EntryTime:    t,
 	}
+	atomic.StoreInt32(&s.atomicOpenCount, int32(len(s.longPositions)+len(s.shortPositions)))
 }
 
 func (s *Store) UpdateLongHighest(sym string, ltp float64) (models.Position, bool) {
+	if atomic.LoadInt32(&s.atomicOpenCount) == 0 {
+		return models.Position{}, false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -330,6 +352,9 @@ func (s *Store) UpdateLongHighest(sym string, ltp float64) (models.Position, boo
 }
 
 func (s *Store) UpdateShortLowest(sym string, ltp float64) (models.Position, bool) {
+	if atomic.LoadInt32(&s.atomicOpenCount) == 0 {
+		return models.Position{}, false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -352,6 +377,7 @@ func (s *Store) CloseLong(sym string) (models.Position, bool) {
 	pos, ok := s.longPositions[sym]
 	if ok {
 		delete(s.longPositions, sym)
+		atomic.StoreInt32(&s.atomicOpenCount, int32(len(s.longPositions)+len(s.shortPositions)))
 	}
 	return pos, ok
 }
@@ -364,6 +390,7 @@ func (s *Store) CloseShort(sym string) (models.Position, bool) {
 	pos, ok := s.shortPositions[sym]
 	if ok {
 		delete(s.shortPositions, sym)
+		atomic.StoreInt32(&s.atomicOpenCount, int32(len(s.longPositions)+len(s.shortPositions)))
 	}
 	return pos, ok
 }
@@ -427,6 +454,7 @@ func (s *Store) HasConsecutiveLosses(count int) bool {
 func (s *Store) ResetDaily(resetTime time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	atomic.StoreInt32(&s.atomicOpenCount, 0)
 	s.lastDailyReset = resetTime
 	s.tradeHistory = nil
 	s.dailyPnL = 0

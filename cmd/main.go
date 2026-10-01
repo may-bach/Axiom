@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -229,6 +229,13 @@ func exitShort(sym, token string, ltp float64, qty int, reason string) {
 }
 
 func checkExits(sym, token string, ltp float64) {
+	if !store.HasAnyPosition() {
+		return
+	}
+	if !store.HasPosition(sym) {
+		return
+	}
+
 	strat := engine.GetStrategy(sym)
 	regime := store.GetRegime()
 	stagnationMin := regime.StagnationMinutes
@@ -282,8 +289,13 @@ func finalizeBaseAndRSRanks() {
 		return
 	}
 
-	sort.Slice(stockReturns, func(i, j int) bool {
-		return stockReturns[i].returnPct < stockReturns[j].returnPct
+	slices.SortFunc(stockReturns, func(a, b stockReturn) int {
+		if a.returnPct < b.returnPct {
+			return -1
+		} else if a.returnPct > b.returnPct {
+			return 1
+		}
+		return 0
 	})
 
 	n := len(stockReturns)
@@ -348,7 +360,7 @@ func finalizeBaseAndRSRanks() {
 	logTrade("═══════════════════════════════════════════════════════")
 }
 
-func checkAllEntries(sym, token string, ltp float64) {
+func checkAllEntries(sym, token string, ltp float64, longTrendOK bool, longTrendReason string, shortTrendOK bool, shortTrendReason string) {
 	if store.HasPosition(sym) {
 		return
 	}
@@ -406,15 +418,12 @@ func checkAllEntries(sym, token string, ltp float64) {
 	isRSLeader := store.IsRSLeader(sym)
 	isRSLaggard := store.IsRSLaggard(sym)
 
-	advPct, avgRet, totalCount := store.GetMarketBreadth()
-
 	// Long base breakout: requires RS Leader AND ltp > vwap AND ltp >= baseHigh * (1 + buf) AND Trend Alignment
 	if allowLong && isRSLeader {
-		trendOK, trendReason := engine.CheckTrendAlignment("LONG", advPct, avgRet, totalCount)
-		if !trendOK {
-			log.Printf("[TREND GATE] %s LONG blocked: %s", sym, trendReason)
+		if !longTrendOK {
+			log.Printf("[TREND GATE] %s LONG blocked: %s", sym, longTrendReason)
 		} else if shouldEnter, reason := engine.CheckBaseBreakoutLong(sym, ltp, baseRange.High, vwap, isRSLeader, strat.BreakoutLong); shouldEnter {
-			logTrade(fmt.Sprintf("%s [Directive: %s, RS Leader, %s]", reason, directive, trendReason))
+			logTrade(fmt.Sprintf("%s [Directive: %s, RS Leader, %s]", reason, directive, longTrendReason))
 			enterLong(sym, token, ltp, strat.Leverage)
 			store.MarkSymbolTradedToday(sym)
 			return
@@ -423,11 +432,10 @@ func checkAllEntries(sym, token string, ltp float64) {
 
 	// Short base breakdown: requires RS Laggard AND ltp < vwap AND ltp <= baseLow * (1 - buf) AND Trend Alignment
 	if allowShort && isRSLaggard {
-		trendOK, trendReason := engine.CheckTrendAlignment("SHORT", advPct, avgRet, totalCount)
-		if !trendOK {
-			log.Printf("[TREND GATE] %s SHORT blocked: %s", sym, trendReason)
+		if !shortTrendOK {
+			log.Printf("[TREND GATE] %s SHORT blocked: %s", sym, shortTrendReason)
 		} else if shouldEnter, reason := engine.CheckBaseBreakdownShort(sym, ltp, baseRange.Low, vwap, isRSLaggard, strat.BreakoutShort); shouldEnter {
-			logTrade(fmt.Sprintf("%s [Directive: %s, RS Laggard, %s]", reason, directive, trendReason))
+			logTrade(fmt.Sprintf("%s [Directive: %s, RS Laggard, %s]", reason, directive, shortTrendReason))
 			enterShort(sym, token, ltp, strat.Leverage)
 			store.MarkSymbolTradedToday(sym)
 			return
@@ -792,6 +800,15 @@ func main() {
 		fmt.Printf("\nPolling Quotes & Smart Signals at %s\n", now.Format("15:04:05"))
 		successCount := 0
 
+		// Precompute universe breadth once per cycle to reduce O(N^2) redundant loops
+		var longTrendOK, shortTrendOK bool
+		var longTrendReason, shortTrendReason string
+		if canEnter && store.IsBaseEstablished() {
+			advPct, avgRet, totalCount := store.GetMarketBreadth()
+			longTrendOK, longTrendReason = engine.CheckTrendAlignment("LONG", advPct, avgRet, totalCount)
+			shortTrendOK, shortTrendReason = engine.CheckTrendAlignment("SHORT", advPct, avgRet, totalCount)
+		}
+
 		for sym, token := range symbolToToken {
 			quote, err := client.GetQuoteDetails("NSE", token)
 			if err != nil {
@@ -800,7 +817,7 @@ func main() {
 				if lerr != nil {
 					log.Printf("%s Quote error: %v", sym, err)
 					if strings.Contains(err.Error(), "exceeds Limit") {
-						time.Sleep(2 * time.Second)
+						time.Sleep(1 * time.Second)
 					}
 					continue
 				}
@@ -814,10 +831,10 @@ func main() {
 
 			successCount++
 
-			// 1. Check exits for open positions
+			// 1. Check exits for open positions (fast atomic skip when 0 open positions)
 			checkExits(sym, token, ltp)
 
-			// 2. Append tick history for mean-reversion filters
+			// 2. Append tick history for mean-reversion filters (zero-allocation in-place shift)
 			store.AppendHistory(sym, ltp, historyWindow)
 
 			// 3. During Base establishment window (09:15 to 09:35 IST): record and anchor Base Range
@@ -855,13 +872,13 @@ func main() {
 
 			// 4. Evaluate new entries if market is open for entries (09:35 to 14:00 IST) and base is established
 			if canEnter && store.IsBaseEstablished() {
-				checkAllEntries(sym, token, ltp)
+				checkAllEntries(sym, token, ltp, longTrendOK, longTrendReason, shortTrendOK, shortTrendReason)
 			}
 
 			// 5. Update established High/Low during market hours only
 			store.UpdateHighLow(sym, ltp)
 
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 
 		// If past 09:35 and base not yet established, finalize it now

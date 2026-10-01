@@ -47,13 +47,13 @@ func NewStore() *Store {
 			Status:         "NORMAL",
 			Color:          "GREEN",
 			MaxPositions:   3,
-			PositionBudget: 15000.0,
-			DailyLossLimit: -750.0,
+			PositionBudget: 75000.0,
+			DailyLossLimit: -3750.0,
 		},
 		account: models.AccountState{
-			InitialCapital:   10000.0,
-			CurrentBalance:   10000.0,
-			PeakBalance:      10000.0,
+			InitialCapital:   50000.0,
+			CurrentBalance:   50000.0,
+			PeakBalance:      50000.0,
 			TotalRealizedPnL: 0.0,
 			LastUpdated:      time.Now().Format("2006-01-02 15:04:05 IST"),
 		},
@@ -519,7 +519,7 @@ func (s *Store) GetPositionBudget(leverage float64) float64 {
 
 	bal := s.account.CurrentBalance
 	if bal <= 0 {
-		bal = 10000.0
+		bal = 50000.0
 	}
 
 	if s.regime.Status == "CAUTION" {
@@ -537,7 +537,7 @@ func (s *Store) GetDailyLossLimit() float64 {
 
 	bal := s.account.CurrentBalance
 	if bal <= 0 {
-		bal = 10000.0
+		bal = 50000.0
 	}
 	// Hard 7.5% daily stop-loss floor
 	return -0.075 * bal

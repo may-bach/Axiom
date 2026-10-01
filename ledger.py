@@ -34,15 +34,15 @@ ACCOUNT_JSON = DATA_DIR / "account.json"
 
 
 def get_account_info():
-    init_cap = 10000.00
-    cur_bal = 10000.00
+    init_cap = 50000.00
+    cur_bal = 50000.00
     last_updated = "N/A"
     if ACCOUNT_JSON.exists():
         try:
             with open(ACCOUNT_JSON, "r", encoding="utf-8") as f:
                 d = json.load(f)
-                init_cap = float(d.get("initial_capital", 10000.00))
-                cur_bal = float(d.get("current_balance", 10000.00))
+                init_cap = float(d.get("initial_capital", 50000.00))
+                cur_bal = float(d.get("current_balance", 50000.00))
                 last_updated = str(d.get("last_updated", "N/A"))
         except Exception:
             pass
@@ -320,7 +320,7 @@ def generate_markdown_report(trades, stats):
     lines.append("## 1. Executive Performance Summary")
     lines.append(f"| Metric | Result | Target Benchmark | Status |")
     lines.append(f"| :--- | :--- | :--- | :--- |")
-    lines.append(f"| **Starting Capital** | ₹{stats['starting_capital']:,.2f} | ₹10,000.00 | Baseline |")
+    lines.append(f"| **Starting Capital** | ₹{stats['starting_capital']:,.2f} | ₹50,000.00 | Baseline |")
     lines.append(f"| **Current Simulated Equity** | ₹{stats['ending_capital']:,.2f} | -- | **{stats['roi_pct']:+.2f}%** |")
     lines.append(f"| **Net Realized P&L** | ₹{stats['net_pnl']:+,.2f} | Positive | {'🟢 PROFIT' if stats['net_pnl'] >= 0 else '🔴 LOSS'} |")
     lines.append(f"| **Total Closed Trades** | {stats['total_trades']} | >= 30 | {'🟢 OK' if stats['total_trades'] >= 30 else '🟡 ACCUMULATING'} |")
@@ -328,7 +328,7 @@ def generate_markdown_report(trades, stats):
     lines.append(f"| **Profit Factor** | {stats['profit_factor']:.2f} | >= 1.40 | {'🟢 PASS' if stats['profit_factor'] >= 1.40 else '🔴 FAIL'} |")
     lines.append(f"| **Average Win vs Loss** | ₹{stats['avg_win']:.2f} / ₹{stats['avg_loss']:.2f} | >= 1.2x | **{stats['win_loss_ratio']:.2f}x** |")
     lines.append(f"| **Largest Single Trade** | Win: +₹{stats['max_win']:.2f} / Loss: ₹{stats['max_loss']:.2f} | -- | -- |")
-    lines.append(f"| **Max Peak-to-Trough Drawdown** | ₹{stats['max_drawdown']:.2f} ({stats['max_drawdown_pct']:.1f}%) | <= ₹1,000.00 (10%) | {'🟢 SAFE' if stats['max_drawdown'] <= 1000 else '🔴 BREACHED'} |\n")
+    lines.append(f"| **Max Peak-to-Trough Drawdown** | ₹{stats['max_drawdown']:.2f} ({stats['max_drawdown_pct']:.1f}%) | <= ₹5,000.00 (10%) | {'🟢 SAFE' if stats['max_drawdown'] <= 5000 else '🔴 BREACHED'} |\n")
 
     lines.append("## 2. Live Capital Readiness Checklist (The 4 Gates)")
     for gate_name, info in stats["gates"].items():
@@ -336,7 +336,7 @@ def generate_markdown_report(trades, stats):
         lines.append(f"- **{gate_name}**: {badge} *(Current: {info['current']})*")
     lines.append("")
     if stats["ready_for_live"]:
-        lines.append("> [!TIP]\n> **VERDICT: GREEN LIGHT FOR REAL ₹10,000 CAPITAL!** All 4 statistical criteria have been satisfied.")
+        lines.append("> [!TIP]\n> **VERDICT: GREEN LIGHT FOR REAL ₹50,000 CAPITAL!** All 4 statistical criteria have been satisfied.")
     else:
         lines.append("> [!NOTE]\n> **VERDICT: CONTINUE PAPER TRADING.** Continue collecting sample trades until all 4 criteria show green.")
 
@@ -480,7 +480,7 @@ def generate_html_dashboard(trades, stats):
                 <div class="text-2xl md:text-3xl font-mono font-extrabold mt-2 {'text-emerald-400' if stats['net_pnl'] >= 0 else 'text-rose-400'}">
                     ₹{stats['net_pnl']:+,.2f}
                 </div>
-                <div class="text-xs text-zinc-500 mt-1 font-mono">{roi_sign}{stats['roi_pct']:.2f}% on ₹10k capital</div>
+                <div class="text-xs text-zinc-500 mt-1 font-mono">{roi_sign}{stats['roi_pct']:.2f}% on ₹50k capital</div>
             </div>
 
             <div class="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl">
@@ -513,7 +513,7 @@ def generate_html_dashboard(trades, stats):
             <div class="flex items-center justify-between">
                 <div>
                     <h2 class="text-lg font-bold text-white">Live Capital Readiness Gates</h2>
-                    <p class="text-xs text-zinc-400">All 4 gates must turn Green before moving from Paper to Real ₹10,000 capital.</p>
+                    <p class="text-xs text-zinc-400">All 4 gates must turn Green before moving from Paper to Real ₹50,000 capital.</p>
                 </div>
                 <div>
                     {'<span class="px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full text-xs font-bold uppercase tracking-wider">READY FOR LIVE</span>' if stats['ready_for_live'] else '<span class="px-3 py-1 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full text-xs font-bold uppercase tracking-wider">COLLECTING SAMPLES</span>'}

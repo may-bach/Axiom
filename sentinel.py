@@ -502,23 +502,23 @@ def evaluate_regime():
         status = "CAUTION"
         color = "YELLOW"
         max_pos = 2
-        budget = 10000.0
+        budget = 50000.0
         if vix_spike:
-            reason = f"Volatility Velocity Alert: India VIX surged {vix_chg:+.1f}% today. Caution Mode: Max 2 positions, Rs.10k size to prevent whipsaw losses."
+            reason = f"Volatility Velocity Alert: India VIX surged {vix_chg:+.1f}% today. Caution Mode: Max 2 positions, Rs.50k size to prevent whipsaw losses."
         elif has_active_theme:
             reason = f"Low VIX ({vix:.2f} < 12) with active {macro_theme} theme. Caution Mode: Max 2 positions, targeting sector leaders."
         elif has_direct_crisis and vix and vix < 16.0:
-            reason = f"Geopolitical headline flagged, but India VIX is calm ({vix:.2f} < 16). Caution Mode: Max 2 positions, Rs.10k size."
+            reason = f"Geopolitical headline flagged, but India VIX is calm ({vix:.2f} < 16). Caution Mode: Max 2 positions, Rs.50k size."
         elif vix and vix < 12.0:
             reason = f"Low volatility consolidation (India VIX {vix:.2f} < 12.0). Caution Mode: Max 2 positions to avoid chop."
         else:
-            reason = f"Macro event or elevated chop expected (Score: {score}). Caution Mode: Max 2 positions, Rs.10k size."
+            reason = f"Macro event or elevated chop expected (Score: {score}). Caution Mode: Max 2 positions, Rs.50k size."
     else:
         status = "NORMAL"
         color = "GREEN"
         max_pos = 3
-        budget = 15000.0
-        reason = f"Market sentiment calm and trending (VIX: {vix:.2f} if vix else 'N/A'). Full Breakout Mode: Up to 3 positions, Rs.15k size."
+        budget = 75000.0
+        reason = f"Market sentiment calm and trending (VIX: {vix:.2f} if vix else 'N/A'). Full Breakout Mode: Up to 3 positions, Rs.75k size."
 
     regime_data = {
         "date": date_str,
@@ -532,7 +532,7 @@ def evaluate_regime():
         "max_positions": max_pos,
         "position_budget": budget,
         "stagnation_minutes": 30,
-        "daily_loss_limit": -750.0,
+        "daily_loss_limit": -3750.0,
         "reason": reason,
         "flagged_headlines": flagged,
         "macro_theme": macro_theme,

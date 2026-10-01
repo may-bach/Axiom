@@ -25,7 +25,7 @@ var (
 	store         *state.Store
 	engine        *strategy.Engine
 
-	defaultBudget       = 15000.0 // Scaled for ₹10k capital + 5x margin
+	defaultBudget       = 75000.0 // Scaled for ₹50k capital + 5x margin (1.5x balance sizing per trade)
 	defaultMaxPositions = 3       // Normal regime allows up to 3 positions
 	historyWindow       = 3
 
@@ -617,11 +617,11 @@ func loadAccountState() {
 	path := filepath.Join("data", "account.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("[ACCOUNT] No account.json found; initializing baseline ₹10,000 capital")
+		log.Printf("[ACCOUNT] No account.json found; initializing baseline ₹50,000 capital")
 		acc := models.AccountState{
-			InitialCapital:     10000.0,
-			CurrentBalance:     10000.0,
-			PeakBalance:        10000.0,
+			InitialCapital:     50000.0,
+			CurrentBalance:     50000.0,
+			PeakBalance:        50000.0,
 			TotalRealizedPnL:   0.0,
 			LastUpdated:        time.Now().Format("2006-01-02 15:04:05 IST"),
 			LastCompoundedDate: "",
